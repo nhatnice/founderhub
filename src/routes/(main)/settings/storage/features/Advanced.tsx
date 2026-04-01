@@ -11,6 +11,7 @@ import { useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import AccountDeletion from '@/business/client/features/AccountDeletion';
+import StoragePayAsYouGo from '@/business/client/features/StoragePayAsYouGo';
 import { FORM_STYLE } from '@/const/layoutTokens';
 import DataImporter from '@/features/DataImporter';
 import { configService } from '@/services/config';
@@ -148,6 +149,7 @@ const AdvancedActions = () => {
   };
   return (
     <>
+      {enableBusinessFeatures && <StoragePayAsYouGo />}
       <Form
         collapsible={false}
         form={form}
