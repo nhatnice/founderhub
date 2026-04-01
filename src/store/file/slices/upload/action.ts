@@ -183,8 +183,31 @@ export class FileUploadActionImpl {
 
       return { ...data, dimensions, filename: file.name };
     } catch (error) {
-      // Handle file storage plan limit error
-      if ((error as any)?.message?.includes('beyond the plan limit')) {
+      const errorMessage = (error as any)?.message ?? '';
+
+      // Handle structured storage block reasons (storage_block:<reason>)
+      if (errorMessage.startsWith('storage_block:')) {
+        const reason = errorMessage.replace('storage_block:', '');
+        onStatusUpdate?.({ id: statusId, type: 'removeFile' });
+
+        const errorKeyMap: Record<string, string> = {
+          monthly_cap_reached: 'upload.storageBlock.monthlyCapReached',
+          no_payment_method: 'upload.storageBlock.noPaymentMethod',
+          overage_not_enabled: 'upload.storageBlock.overageNotEnabled',
+          subscription_past_due: 'upload.storageBlock.subscriptionPastDue',
+          subscription_unpaid: 'upload.storageBlock.subscriptionUnpaid',
+          upgrade_required: 'upload.storageBlock.upgradeRequired',
+        };
+
+        notification.error({
+          description: t(errorKeyMap[reason] ?? 'upload.storageLimitExceeded', { ns: 'error' }),
+          message: t('upload.uploadFailed', { ns: 'error' }),
+        });
+        return;
+      }
+
+      // Legacy fallback
+      if (errorMessage.includes('beyond the plan limit')) {
         onStatusUpdate?.({ id: statusId, type: 'removeFile' });
         notification.error({
           description: t('upload.storageLimitExceeded', { ns: 'error' }),
@@ -192,6 +215,7 @@ export class FileUploadActionImpl {
         });
         return;
       }
+
       throw error;
     }
   };
