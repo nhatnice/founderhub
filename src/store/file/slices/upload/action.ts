@@ -183,24 +183,36 @@ export class FileUploadActionImpl {
 
       return { ...data, dimensions, filename: file.name };
     } catch (error) {
-      const errorMessage = (error as any)?.message ?? '';
+      const errorMessage = error instanceof Error ? error.message : '';
 
       // Handle structured storage block reasons (storage_block:<reason>)
       if (errorMessage.startsWith('storage_block:')) {
         const reason = errorMessage.replace('storage_block:', '');
         onStatusUpdate?.({ id: statusId, type: 'removeFile' });
 
-        const errorKeyMap: Record<string, string> = {
+        // Keep this union in sync with cloud `StorageBlockReason` in
+        // src/server/services/storageOverage/index.ts (cloud repo).
+        type StorageBlockReason =
+          | 'monthly_cap_reached'
+          | 'no_payment_method'
+          | 'overage_not_enabled'
+          | 'subscription_past_due'
+          | 'subscription_unpaid'
+          | 'upgrade_required';
+
+        const errorKeyMap = {
           monthly_cap_reached: 'upload.storageBlock.monthlyCapReached',
           no_payment_method: 'upload.storageBlock.noPaymentMethod',
           overage_not_enabled: 'upload.storageBlock.overageNotEnabled',
           subscription_past_due: 'upload.storageBlock.subscriptionPastDue',
           subscription_unpaid: 'upload.storageBlock.subscriptionUnpaid',
           upgrade_required: 'upload.storageBlock.upgradeRequired',
-        };
+        } as const satisfies Record<StorageBlockReason, string>;
+
+        const key = (errorKeyMap as Record<string, string>)[reason];
 
         notification.error({
-          description: t(errorKeyMap[reason] ?? 'upload.storageLimitExceeded', { ns: 'error' }),
+          description: t(key ?? 'upload.storageLimitExceeded', { ns: 'error' }),
           message: t('upload.uploadFailed', { ns: 'error' }),
         });
         return;
