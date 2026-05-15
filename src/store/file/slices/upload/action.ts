@@ -209,10 +209,10 @@ export class FileUploadActionImpl {
           upgrade_required: 'upload.storageBlock.upgradeRequired',
         } as const satisfies Record<StorageBlockReason, string>;
 
-        const key = (errorKeyMap as Record<string, string>)[reason];
-
         notification.error({
-          description: t(key ?? 'upload.storageLimitExceeded', { ns: 'error' }),
+          description: Object.hasOwn(errorKeyMap, reason)
+            ? t(errorKeyMap[reason as StorageBlockReason], { ns: 'error' })
+            : t('upload.storageLimitExceeded', { ns: 'error' }),
           message: t('upload.uploadFailed', { ns: 'error' }),
         });
         return;
