@@ -1,6 +1,7 @@
 export * from './bedrock-model-mapping';
 export * from './branding';
 export * from './llm';
+export * from './storage';
 export * from './url';
 
 const isDev = process.env.NODE_ENV === 'development';

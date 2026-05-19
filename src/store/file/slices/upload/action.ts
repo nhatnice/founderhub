@@ -1,4 +1,4 @@
-import { LOBE_CHAT_CLOUD } from '@lobechat/business-const';
+import { LOBE_CHAT_CLOUD, StorageBlockReason } from '@lobechat/business-const';
 import { t } from 'i18next';
 import { sha256 } from 'js-sha256';
 
@@ -54,6 +54,8 @@ interface UploadWithProgressResult {
 }
 
 type Setter = StoreSetter<FileStore>;
+type UploadStorageBlockReason = Exclude<StorageBlockReason, typeof StorageBlockReason.WithinLimit>;
+
 export const createFileUploadSlice = (set: Setter, get: () => FileStore, _api?: unknown) =>
   new FileUploadActionImpl(set, get, _api);
 
@@ -190,28 +192,18 @@ export class FileUploadActionImpl {
         const reason = errorMessage.replace('storage_block:', '');
         onStatusUpdate?.({ id: statusId, type: 'removeFile' });
 
-        // Keep this union in sync with cloud `StorageBlockReason` in
-        // src/server/services/storageOverage/index.ts (cloud repo).
-        type StorageBlockReason =
-          | 'monthly_cap_reached'
-          | 'no_payment_method'
-          | 'overage_not_enabled'
-          | 'subscription_past_due'
-          | 'subscription_unpaid'
-          | 'upgrade_required';
-
         const errorKeyMap = {
-          monthly_cap_reached: 'upload.storageBlock.monthlyCapReached',
-          no_payment_method: 'upload.storageBlock.noPaymentMethod',
-          overage_not_enabled: 'upload.storageBlock.overageNotEnabled',
-          subscription_past_due: 'upload.storageBlock.subscriptionPastDue',
-          subscription_unpaid: 'upload.storageBlock.subscriptionUnpaid',
-          upgrade_required: 'upload.storageBlock.upgradeRequired',
-        } as const satisfies Record<StorageBlockReason, string>;
+          [StorageBlockReason.MonthlyCapReached]: 'upload.storageBlock.monthlyCapReached',
+          [StorageBlockReason.NoPaymentMethod]: 'upload.storageBlock.noPaymentMethod',
+          [StorageBlockReason.OverageNotEnabled]: 'upload.storageBlock.overageNotEnabled',
+          [StorageBlockReason.SubscriptionPastDue]: 'upload.storageBlock.subscriptionPastDue',
+          [StorageBlockReason.SubscriptionUnpaid]: 'upload.storageBlock.subscriptionUnpaid',
+          [StorageBlockReason.UpgradeRequired]: 'upload.storageBlock.upgradeRequired',
+        } as const satisfies Record<UploadStorageBlockReason, string>;
 
         notification.error({
           description: Object.hasOwn(errorKeyMap, reason)
-            ? t(errorKeyMap[reason as StorageBlockReason], { ns: 'error' })
+            ? t(errorKeyMap[reason as UploadStorageBlockReason], { ns: 'error' })
             : t('upload.storageLimitExceeded', { ns: 'error' }),
           message: t('upload.uploadFailed', { ns: 'error' }),
         });
