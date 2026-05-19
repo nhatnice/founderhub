@@ -157,7 +157,7 @@
     ]
   },
   "overrides": {
-    "@types/react": "19.2.13",
+    "@types/react": "19.2.15",
     "antd": "6.3.5",
     "better-auth": "1.4.6",
     "better-call": "1.1.8",
@@ -395,7 +395,7 @@
     "query-string": "^9.3.1",
     "random-words": "^2.0.1",
     "rc-util": "^5.44.4",
-    "react": "19.2.5",
+    "react": "19.2.6",
     "react-confetti": "^6.4.0",
     "react-dom": "19.2.5",
     "react-fast-marquee": "^1.6.5",
@@ -478,7 +478,7 @@
     "@types/pdf-parse": "^1.1.4",
     "@types/pdfkit": "^0.17.4",
     "@types/pg": "^8.16.0",
-    "@types/react": "19.2.13",
+    "@types/react": "19.2.15",
     "@types/react-dom": "^19.2.3",
     "@types/rtl-detect": "^1.0.3",
     "@types/semver": "^7.7.1",
@@ -553,7 +553,7 @@
     ],
     "overrides": {
       "@react-pdf/image": "3.0.4",
-      "@types/react": "19.2.13",
+      "@types/react": "19.2.15",
       "antd": "6.3.5",
       "better-auth": "1.4.6",
       "better-call": "1.1.8",
@@ -561,7 +561,7 @@
       "fast-xml-parser": "5.4.2",
       "lexical": "0.42.0",
       "pdfjs-dist": "5.4.530",
-      "react": "19.2.5",
+      "react": "19.2.6",
       "react-dom": "19.2.5",
       "stylelint-config-clean-order": "7.0.0"
     },
