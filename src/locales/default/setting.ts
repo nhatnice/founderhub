@@ -1333,14 +1333,35 @@ When I am ___, I need ___
   'workspace.general.avatar.uploadFailed': 'Failed to upload avatar',
   'workspace.general.delete.confirm.content':
     'This action cannot be undone. Type the workspace name "{{name}}" to confirm.',
+  'workspace.general.delete.confirm.continue': 'Continue',
   'workspace.general.delete.confirm.mismatch': "The name doesn't match. Deletion aborted.",
+  'workspace.general.delete.confirm.namePrompt': 'To confirm, type "{{name}}"',
   'workspace.general.delete.confirm.ok': 'Delete workspace',
-  'workspace.general.delete.confirm.title': 'Delete this workspace?',
+  'workspace.general.delete.confirm.phrase': 'delete my workspace',
+  'workspace.general.delete.confirm.phrasePrompt': 'To confirm, type "{{phrase}}"',
+  'workspace.general.delete.confirm.preparation':
+    'Before deleting, cancel any active subscription. Billing and spend history will be retained for audit.',
+  'workspace.general.delete.confirm.title': 'Delete Workspace',
+  'workspace.general.delete.confirm.warning.items.agents':
+    'All agents, skills, and their configurations',
+  'workspace.general.delete.confirm.warning.items.billing':
+    'Subscription, budget settings, and auto top-up',
+  'workspace.general.delete.confirm.warning.items.conversations':
+    'All sessions, messages, topics, and tasks',
+  'workspace.general.delete.confirm.warning.items.files':
+    'Uploaded files, generations, and knowledge base data',
+  'workspace.general.delete.confirm.warning.items.members':
+    'Members, pending invitations, and audit logs',
+  'workspace.general.delete.confirm.warning.lead':
+    'The {{name}} workspace will be permanently deleted, along with:',
+  'workspace.general.delete.confirm.warning.tail':
+    'This cannot be undone. Spend and top-up history will be retained for audit only.',
   'workspace.general.delete.cta': 'Delete Workspace',
   'workspace.general.delete.description':
-    'Permanently remove this workspace and all of its members and invitations. This action cannot be reversed.',
+    'Permanently delete this workspace and everything inside it — agents, sessions, messages, files, members, and invitations. This action cannot be reversed.',
   'workspace.general.delete.failed': 'Failed to delete workspace',
-  'workspace.general.delete.hint': 'Once deleted, this workspace cannot be recovered.',
+  'workspace.general.delete.hint':
+    'Cancel any active subscription before deletion. Billing history is kept for audit.',
   'workspace.general.delete.notOwner': 'Only the workspace owner can delete this workspace.',
   'workspace.general.delete.title': 'Delete Workspace',
   'workspace.general.id.copied': 'Workspace ID copied',
@@ -1468,6 +1489,8 @@ When I am ___, I need ___
   'workspace.wizard.step2.features.pro.onDemand': 'Extra usage billed on-demand · AutoTopUp',
   'workspace.wizard.step2.features.pro.priorityModels': 'Priority access to premium models',
   'workspace.wizard.step2.features.pro.support': 'Priority email support',
+  'workspace.wizard.step2.left.creditsHobbyHint':
+    'Solo workspace · pay-as-you-go with no monthly allowance',
   'workspace.wizard.step2.left.creditsLabel': 'Credits per month',
   'workspace.wizard.step2.left.creditsProHint':
     'Workspace-wide shared pool · seats add seats, not credits',
@@ -1476,9 +1499,7 @@ When I am ___, I need ___
     'Perfect for using LobeHub on your own. Upgrade later to invite collaborators.',
   'workspace.wizard.step2.left.headline': 'Power your team with {{plan}}',
   'workspace.wizard.step2.left.hobbyTopUpHint':
-    'No monthly credit allowance · top up anytime ({{percent}}% above base, since there is no subscription fee)',
-  'workspace.wizard.step2.left.hobbyTopUpLabel': 'Top up rate',
-  'workspace.wizard.step2.left.hobbyTopUpValue': '${{price}} / million credits',
+    'Top up anytime — ${{price}} / M ({{percent}}% above base, since there is no subscription fee)',
   'workspace.wizard.step2.left.proTagline':
     '${{fee}}/user per month with extra usage billed on-demand. Cancel anytime.',
   'workspace.wizard.step2.left.proTopUpHint':
@@ -1505,6 +1526,46 @@ When I am ___, I need ___
     'Add your team members by email. You can also invite them later.',
   'workspace.wizard.step3.title': 'Welcome to {{name}}!',
   'workspace.wizard.title': 'Create a new workspace',
+  'workspace.onboarding.title': 'Set up your workspace',
+  'workspace.onboarding.stepLabel': 'Step {{current}} of {{total}}',
+  'workspace.onboarding.skip': 'Skip',
+  'workspace.onboarding.prev': 'Back',
+  'workspace.onboarding.next': 'Next',
+  'workspace.onboarding.finish': 'Finish',
+  'workspace.onboarding.skipConfirm.title': 'Skip workspace setup?',
+  'workspace.onboarding.skipConfirm.description':
+    'You can always customize LobeAI and add agents later in Workspace settings.',
+  'workspace.onboarding.skipConfirm.ok': 'Skip',
+  'workspace.onboarding.skipConfirm.cancel': 'Continue setup',
+  'workspace.onboarding.toast.saved': 'Saved',
+  'workspace.onboarding.toast.failed': 'Could not save. Please try again.',
+  'workspace.onboarding.step1.heading': 'Personalize LobeAI',
+  'workspace.onboarding.step1.subtitle':
+    'Give your workspace assistant an identity your team will recognize.',
+  'workspace.onboarding.step1.avatarLabel': 'Avatar',
+  'workspace.onboarding.step1.avatarHint': 'Pick an emoji or paste an image URL.',
+  'workspace.onboarding.step1.nameLabel': 'Display name',
+  'workspace.onboarding.step1.namePlaceholder': 'e.g. LobeAI',
+  'workspace.onboarding.step2.heading': "What's this workspace mostly for?",
+  'workspace.onboarding.step2.subtitle':
+    "We'll suggest a few starter agents based on your pick. You can change this later.",
+  'workspace.onboarding.step2.scenario.work': 'Work',
+  'workspace.onboarding.step2.scenario.workDesc': 'Productivity, meetings, and writing.',
+  'workspace.onboarding.step2.scenario.coding': 'Coding',
+  'workspace.onboarding.step2.scenario.codingDesc': 'Code review, debugging, and docs.',
+  'workspace.onboarding.step2.scenario.design': 'Design',
+  'workspace.onboarding.step2.scenario.designDesc': 'UI/UX critique and brand assets.',
+  'workspace.onboarding.step2.scenario.business': 'Business',
+  'workspace.onboarding.step2.scenario.businessDesc': 'Strategy, analysis, and communication.',
+  'workspace.onboarding.step2.scenario.learning': 'Learning',
+  'workspace.onboarding.step2.scenario.learningDesc': 'Study, tutoring, and language practice.',
+  'workspace.onboarding.step2.scenario.life': 'Life',
+  'workspace.onboarding.step2.scenario.lifeDesc': 'Health, planning, and household.',
+  'workspace.onboarding.step3.heading': 'Recommended agents',
+  'workspace.onboarding.step3.subtitle':
+    'Pick the ones you want. We will add them to your workspace.',
+  'workspace.onboarding.step3.skipInstall': "Don't install any",
+  'workspace.onboarding.step3.installed': 'Added {{count}} agent(s) to your workspace',
   'workspaceSetting.breadcrumb.settings': 'Settings',
   'workspaceSetting.group.admin': 'Admin',
   'workspaceSetting.group.agent': 'Agent',
