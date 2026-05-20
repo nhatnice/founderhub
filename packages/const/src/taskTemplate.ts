@@ -63,6 +63,29 @@ export const TASK_TEMPLATE_FALLBACK_CATEGORIES: TaskTemplateCategory[] = [
   'learning-research',
 ];
 
+/**
+ * Categories that only make sense in a personal context. When the recommendation
+ * is requested from inside a workspace, every template under these categories
+ * is removed from the candidate pool — both matched and fallback — so a team
+ * dashboard never surfaces "bedtime gratitude" / "weekly family finance" etc.
+ */
+export const TASK_TEMPLATE_PERSONAL_ONLY_CATEGORIES: TaskTemplateCategory[] = [
+  'parenting',
+  'health',
+  'hobbies',
+  'personal-life',
+];
+
+/**
+ * Fallback pool used when the workspace's matched-interest candidates are not
+ * enough to fill `count`. Mirrors `TASK_TEMPLATE_FALLBACK_CATEGORIES` but
+ * leans business-y instead of personal-y.
+ */
+export const TASK_TEMPLATE_WORKSPACE_FALLBACK_CATEGORIES: TaskTemplateCategory[] = [
+  'operations',
+  'learning-research',
+];
+
 export const TASK_TEMPLATE_RECOMMEND_COUNT = 3;
 
 export const taskTemplates: TaskTemplate[] = [

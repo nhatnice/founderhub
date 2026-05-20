@@ -1,6 +1,10 @@
 // @vitest-environment node
 import type { TaskTemplate } from '@lobechat/const';
-import { TASK_TEMPLATE_RECOMMEND_COUNT, taskTemplates } from '@lobechat/const';
+import {
+  TASK_TEMPLATE_PERSONAL_ONLY_CATEGORIES,
+  TASK_TEMPLATE_RECOMMEND_COUNT,
+  taskTemplates,
+} from '@lobechat/const';
 import { describe, expect, it } from 'vitest';
 
 import { isTemplateSkillSourceEligible, TaskTemplateService } from './index';
@@ -177,6 +181,50 @@ describe('TaskTemplateService.listDailyRecommend', () => {
       });
       expect(picked.some((t) => t.id === excludedId)).toBe(false);
     }
+  });
+
+  it('drops personal-only categories in workspace mode', async () => {
+    const service = new TaskTemplateService('user-1');
+    const personalCategories = new Set(TASK_TEMPLATE_PERSONAL_ONLY_CATEGORIES);
+
+    // Use a personal interest that would otherwise match personal-life templates.
+    const picked = await service.listDailyRecommend(['personal'], {
+      now: UTC_DAY_1,
+      workspaceMode: true,
+    });
+    for (const p of picked) {
+      expect(personalCategories.has(p.category), `template ${p.id} category`).toBe(false);
+    }
+  });
+
+  it('keeps personal-only categories in personal mode (default)', async () => {
+    const service = new TaskTemplateService('user-1');
+    const personalCategories = new Set(TASK_TEMPLATE_PERSONAL_ONLY_CATEGORIES);
+
+    // Sample enough seeds so the personal fallback pool surfaces.
+    const reached = new Set<string>();
+    for (const seed of ['p1', 'p2', 'p3', 'p4', 'p5', 'p6']) {
+      const picked = await service.listDailyRecommend(['personal'], {
+        now: UTC_DAY_1,
+        refreshSeed: seed,
+      });
+      for (const p of picked) {
+        if (personalCategories.has(p.category)) reached.add(p.id);
+      }
+    }
+    expect(reached.size).toBeGreaterThan(0);
+  });
+
+  it('produces a different shuffle seed for workspace mode vs personal mode', async () => {
+    // Seed namespaces are isolated so workspace recommendations don't mirror
+    // the personal lineup for the same user/day.
+    const service = new TaskTemplateService('user-1');
+    const personal = await service.listDailyRecommend(['coding'], { now: UTC_DAY_1 });
+    const workspace = await service.listDailyRecommend(['coding'], {
+      now: UTC_DAY_1,
+      workspaceMode: true,
+    });
+    expect(personal.map((t) => t.id).join(',')).not.toBe(workspace.map((t) => t.id).join(','));
   });
 
   it('changes the first item across refreshSeeds when matched candidates are fewer than the default recommendation count', async () => {

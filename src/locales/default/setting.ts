@@ -1386,6 +1386,10 @@ When I am ___, I need ___
   'workspace.general.name.title': 'Workspace Name',
   'workspace.general.role.label': 'Your role',
   'workspace.general.save': 'Save',
+  'workspace.general.scenarios.description':
+    'Pick the areas this workspace is mainly used for. We will recommend relevant agents based on your selection.',
+  'workspace.general.scenarios.hint': 'You can adjust these any time.',
+  'workspace.general.scenarios.title': 'Scenarios',
   'workspace.general.subtitle': 'Manage your workspace name, URL, avatar and other settings',
   'workspace.general.title': 'General',
   'workspace.general.updateFailed': 'Failed to update workspace',
@@ -1587,9 +1591,9 @@ When I am ___, I need ___
   'workspace.onboarding.step2.scenario.product': 'Product & Management',
   'workspace.onboarding.step2.scenario.sales': 'Sales & Customer Relations',
   'workspace.onboarding.step2.scenario.writing': 'Content Creation',
-  'workspace.onboarding.step3.heading': 'Recommended agents',
-  'workspace.onboarding.step3.subtitle':
-    'Pick the ones you want. We will add them to your workspace.',
+  'workspace.onboarding.step3.heading': 'Add a few agents to your workspace',
+  'workspace.onboarding.step3.subtitle': 'Pick a few to start — discover more anytime.',
+  'workspace.onboarding.step3.categoryAll': 'All',
   'workspace.onboarding.step3.skipInstall': "Don't install any",
   'workspace.onboarding.step3.installed': 'Added {{count}} agent(s) to your workspace',
   'workspace.onboarding.step3.empty': 'No recommendations available right now.',
