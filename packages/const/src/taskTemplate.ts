@@ -76,16 +76,6 @@ export const TASK_TEMPLATE_PERSONAL_ONLY_CATEGORIES: TaskTemplateCategory[] = [
   'personal-life',
 ];
 
-/**
- * Fallback pool used when the workspace's matched-interest candidates are not
- * enough to fill `count`. Mirrors `TASK_TEMPLATE_FALLBACK_CATEGORIES` but
- * leans business-y instead of personal-y.
- */
-export const TASK_TEMPLATE_WORKSPACE_FALLBACK_CATEGORIES: TaskTemplateCategory[] = [
-  'operations',
-  'learning-research',
-];
-
 export const TASK_TEMPLATE_RECOMMEND_COUNT = 3;
 
 export const taskTemplates: TaskTemplate[] = [
