@@ -1474,7 +1474,7 @@
   "workspace.onboarding.step1.guide.name.desc": "A name your teammates instantly recognize keeps collaboration smooth.",
   "workspace.onboarding.step1.guide.name.title": "Give It a Name",
   "workspace.onboarding.step1.heading": "Personalize LobeAI",
-  "workspace.onboarding.step1.nameLabel": "Display name",
+  "workspace.onboarding.step1.nameLabel": "LobeAI's name",
   "workspace.onboarding.step1.namePlaceholder": "e.g. LobeAI",
   "workspace.onboarding.step1.sentence.1": "Ready? Let me be your team's go-to teammate.",
   "workspace.onboarding.step1.sentence.2": "What role do you want me to play in this workspace?",

@@ -1474,7 +1474,7 @@
   "workspace.onboarding.step1.guide.name.desc": "团队成员一眼就能认出的名字，会让协作更顺畅。",
   "workspace.onboarding.step1.guide.name.title": "起个名字",
   "workspace.onboarding.step1.heading": "给 LobeAI 取个名字",
-  "workspace.onboarding.step1.nameLabel": "显示名称",
+  "workspace.onboarding.step1.nameLabel": "LobeAI 的名称",
   "workspace.onboarding.step1.namePlaceholder": "例如：LobeAI",
   "workspace.onboarding.step1.sentence.1": "准备好了吗？让我成为你团队的好搭档。",
   "workspace.onboarding.step1.sentence.2": "想让我在工作区里担当什么角色？",

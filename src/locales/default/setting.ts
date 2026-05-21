@@ -1562,7 +1562,7 @@ When I am ___, I need ___
   'workspace.onboarding.step1.avatarHint': 'Pick an emoji or upload an image.',
   'workspace.onboarding.step1.avatarTooLarge': 'Avatar file must be smaller than 5MB.',
   'workspace.onboarding.step1.avatarUploadFailed': 'Failed to upload avatar',
-  'workspace.onboarding.step1.nameLabel': 'Display name',
+  'workspace.onboarding.step1.nameLabel': "LobeAI's name",
   'workspace.onboarding.step1.namePlaceholder': 'e.g. LobeAI',
   'workspace.onboarding.step1.suggestion.title': 'Need ideas? Pick one to start.',
   'workspace.onboarding.step1.suggestion.switch': 'Try another set',
