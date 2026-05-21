@@ -14,7 +14,7 @@ permissions:
   packages: write
 
 env:
-  REGISTRY_IMAGE: ghcr.io/${{ github.repository_owner }}/lobehub
+  REGISTRY_IMAGE: ghcr.io/${{ github.repository_owner }}/founderhub
 
 jobs:
   build:
