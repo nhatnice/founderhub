@@ -18,8 +18,8 @@
     "@lobechat/types": "workspace:*"
   },
   "peerDependencies": {
-    "@icons-pack/react-simple-icons": "^13.8.0",
-    "@lobehub/ui": "^5",
+    "@icons-pack/react-simple-icons": "^13.13.0",
+    "@lobehub/ui": "^5.14.1",
     "klavis": "^2.15.0"
   }
 }

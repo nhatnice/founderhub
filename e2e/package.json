@@ -14,16 +14,16 @@
     "test:smoke": "cucumber-js --config cucumber.config.js --tags '@smoke'"
   },
   "dependencies": {
-    "@cucumber/cucumber": "^12.2.0",
-    "@playwright/test": "^1.57.0",
+    "@cucumber/cucumber": "^12.9.0",
+    "@playwright/test": "^1.60.0",
     "bcryptjs": "^3.0.3",
-    "pg": "^8.16.0",
-    "playwright": "^1.57.0"
+    "pg": "^8.21.0",
+    "playwright": "^1.60.0"
   },
   "devDependencies": {
-    "@types/node": "^24.10.1",
+    "@types/node": "^24.12.4",
     "cross-env": "^10.1.0",
-    "tsx": "^4.20.6",
+    "tsx": "^4.22.3",
     "typescript": "^5.9.3"
   }
 }

@@ -7,7 +7,7 @@
   "types": "./src/index.ts",
   "dependencies": {
     "@lobechat/file-loaders": "workspace:*",
-    "diff": "^8.0.2",
+    "diff": "^8.0.4",
     "fast-glob": "^3.3.3"
   }
 }
