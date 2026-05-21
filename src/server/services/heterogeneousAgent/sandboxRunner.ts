@@ -1,4 +1,5 @@
 import debug from 'debug';
+import { Client as SshClient } from 'ssh2';
 
 import { appEnv } from '@/envs/app';
 import type { MarketService } from '@/server/services/market';
@@ -186,7 +187,69 @@ export async function spawnHeteroSandbox(params: SandboxRunParams): Promise<void
     topicId,
   );
 
-  await marketService
-    .getSDK()
-    .plugins.runBuildInTool('runCommand', { command: shellCommand } as any, { topicId, userId });
+  if (appEnv.CLOUD_SANDBOX_SSH_HOST) {
+    await sshExec(shellCommand, operationId);
+  } else {
+    await marketService
+      .getSDK()
+      .plugins.runBuildInTool('runCommand', { command: shellCommand } as any, { topicId, userId });
+  }
+}
+
+/**
+ * SSH into the configured VPS and run shellCommand as a detached background process.
+ * Uses nohup + & so the SSH session can close immediately while the command keeps running.
+ * Stdout/stderr are redirected to /tmp/lh-{operationId}.log on the VPS for debugging.
+ */
+function sshExec(shellCommand: string, operationId: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const {
+      CLOUD_SANDBOX_SSH_HOST,
+      CLOUD_SANDBOX_SSH_PORT,
+      CLOUD_SANDBOX_SSH_USER,
+      CLOUD_SANDBOX_SSH_PRIVATE_KEY_BASE64,
+    } = appEnv;
+
+    if (
+      !CLOUD_SANDBOX_SSH_HOST ||
+      !CLOUD_SANDBOX_SSH_USER ||
+      !CLOUD_SANDBOX_SSH_PRIVATE_KEY_BASE64
+    ) {
+      return reject(
+        new Error(
+          'Cloud sandbox SSH env vars not configured (CLOUD_SANDBOX_SSH_HOST, CLOUD_SANDBOX_SSH_USER, CLOUD_SANDBOX_SSH_PRIVATE_KEY_BASE64)',
+        ),
+      );
+    }
+
+    const privateKey = Buffer.from(CLOUD_SANDBOX_SSH_PRIVATE_KEY_BASE64, 'base64').toString(
+      'utf-8',
+    );
+    const logFile = `/tmp/lh-${operationId}.log`;
+    const bgCommand = `nohup bash -c ${JSON.stringify(shellCommand)} > ${logFile} 2>&1 &`;
+
+    const conn = new SshClient();
+
+    conn.on('ready', () => {
+      conn.exec(bgCommand, (err: Error | undefined, stream: NodeJS.EventEmitter) => {
+        if (err) {
+          conn.end();
+          return reject(err);
+        }
+        stream.on('close', () => {
+          conn.end();
+          resolve();
+        });
+      });
+    });
+
+    conn.on('error', reject);
+
+    conn.connect({
+      host: CLOUD_SANDBOX_SSH_HOST,
+      port: CLOUD_SANDBOX_SSH_PORT ?? 22,
+      username: CLOUD_SANDBOX_SSH_USER,
+      privateKey,
+    });
+  });
 }
