@@ -1364,6 +1364,18 @@ When I am ___, I need ___
     'Cancel any active subscription before deletion. Billing history is kept for audit.',
   'workspace.general.delete.notOwner': 'Only the workspace owner can delete this workspace.',
   'workspace.general.delete.title': 'Delete Workspace',
+  'workspace.general.devReset.confirm.cancel': 'Cancel',
+  'workspace.general.devReset.confirm.description':
+    'This clears finishedAt / skippedAt / step / scenarios and reopens the wizard.',
+  'workspace.general.devReset.confirm.ok': 'Reset',
+  'workspace.general.devReset.confirm.title': 'Reset workspace onboarding?',
+  'workspace.general.devReset.cta': 'Reset onboarding',
+  'workspace.general.devReset.description':
+    'Clears the onboarding gate (finishedAt / skippedAt / step / scenarios) and reopens the wizard. Dev-only — not visible in production.',
+  'workspace.general.devReset.failed': 'Failed to reset onboarding',
+  'workspace.general.devReset.hint': 'Dev only',
+  'workspace.general.devReset.success': 'Workspace onboarding reset',
+  'workspace.general.devReset.title': 'Reset workspace onboarding',
   'workspace.general.id.copied': 'Workspace ID copied',
   'workspace.general.id.description': "This is your workspace's unique ID.",
   'workspace.general.id.hint': 'Used when interacting with the API.',
