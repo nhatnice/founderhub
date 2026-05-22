@@ -553,6 +553,9 @@
       "@lobehub/editor",
       "ffmpeg-static"
     ],
+    "neverBuiltDependencies": [
+      "cpu-features"
+    ],
     "overrides": {
       "@react-pdf/image": "3.0.4",
       "@types/react": "19.2.13",
