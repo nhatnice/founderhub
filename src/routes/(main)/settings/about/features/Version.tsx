@@ -136,6 +136,7 @@ const Version = memo<{ mobile?: boolean }>(({ mobile }) => {
           <div style={{ fontSize: 18, fontWeight: 'bolder' }}>{BRANDING_NAME}</div>
           <Flexbox gap={6} horizontal={!mobile}>
             <Tag>v{APP_VERSION}</Tag>
+            <Tag color={'red'}>In development by NHΛT TRΛN</Tag>
 
             {buildChannel && buildChannel !== 'stable' && (
               <Tag color={'gold'}>
