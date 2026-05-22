@@ -49,6 +49,7 @@ jobs:
         with:
           images: ${{ env.REGISTRY_IMAGE }}
           tags: |
+            type=raw,value=latest
             type=raw,value=founderhub
             type=raw,value=founderhub-${{ steps.vars.outputs.sha_short }}
 
@@ -114,6 +115,7 @@ jobs:
         with:
           images: ${{ env.REGISTRY_IMAGE }}
           tags: |
+            type=raw,value=latest
             type=raw,value=founderhub
             type=raw,value=founderhub-${{ steps.vars.outputs.sha_short }}
 
