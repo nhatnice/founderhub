@@ -86,7 +86,7 @@ RUN set -e && \
     npm i -g corepack@latest && \
     corepack enable && \
     corepack use $(sed -n 's/.*"packageManager": "\(.*\)".*/\1/p' package.json) && \
-    pnpm i && \
+    pnpm i --ignore-scripts && \
     mkdir -p /deps && \
     cd /deps && \
     echo '{"name":"deps","private":true}' > package.json && \
