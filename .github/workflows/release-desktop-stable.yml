@@ -76,6 +76,7 @@ jobs:
   check-stable:
     name: Check Release Version
     runs-on: ubuntu-latest
+    if: ${{ !contains(github.event.release.target_commitish, 'founderhub') }}
     outputs:
       is_stable: ${{ steps.check.outputs.is_stable }}
       version: ${{ steps.check.outputs.version }}
