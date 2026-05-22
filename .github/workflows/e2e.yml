@@ -1,6 +1,9 @@
 name: E2E CI
 
-on: [push, pull_request]
+on:
+  pull_request:
+    types: [closed]
+    branches: [founderhub]
 
 permissions:
   actions: write
@@ -26,6 +29,7 @@ jobs:
   # Check for duplicate runs
   check-duplicate-run:
     name: Check Duplicate Run
+    if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     outputs:
       should_skip: ${{ steps.skip_check.outputs.should_skip }}
@@ -39,10 +43,7 @@ jobs:
 
   e2e:
     needs: check-duplicate-run
-    if: >-
-      github.ref == 'refs/heads/main' ||
-      github.ref == 'refs/heads/canary' ||
-      needs.check-duplicate-run.outputs.should_skip != 'true'
+    if: needs.check-duplicate-run.outputs.should_skip != 'true'
     name: Test Web App
     runs-on: ubuntu-latest
     services:
