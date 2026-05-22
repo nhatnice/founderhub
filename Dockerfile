@@ -69,6 +69,10 @@ ENV NODE_OPTIONS="--max-old-space-size=8192"
 
 WORKDIR /app
 
+# Install build tools required for native addons (e.g. ssh2/cpu-features)
+# Only in builder stage — not copied to final image
+RUN apt update && apt install -qy python3 make g++ && rm -rf /var/lib/apt/lists/*
+
 COPY package.json pnpm-workspace.yaml ./
 COPY .npmrc ./
 COPY packages ./packages
@@ -86,7 +90,7 @@ RUN set -e && \
     npm i -g corepack@latest && \
     corepack enable && \
     corepack use $(sed -n 's/.*"packageManager": "\(.*\)".*/\1/p' package.json) && \
-    pnpm i --ignore-scripts && \
+    pnpm i && \
     mkdir -p /deps && \
     cd /deps && \
     echo '{"name":"deps","private":true}' > package.json && \
