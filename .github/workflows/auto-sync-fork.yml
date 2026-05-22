@@ -1,0 +1,24 @@
+on:
+  schedule:
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Sync Main Branch
+        uses: tgymnich/fork-sync@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          base: main
+          head: main
+          owner: lobehub
+
+      - name: Sync Canary Branch
+        uses: tgymnich/fork-sync@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          base: canary
+          head: canary
+          owner: lobehub
