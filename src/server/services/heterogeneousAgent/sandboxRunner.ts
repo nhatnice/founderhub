@@ -180,12 +180,14 @@ export async function spawnHeteroSandbox(params: SandboxRunParams): Promise<void
     setupParts.length > 0 ? `${setupParts.join(' && \\\n')} && \\\n${mainCommand}` : mainCommand;
 
   log(
-    'spawnHeteroSandbox: userId=%s op=%s type=%s topic=%s',
+    'spawnHeteroSandbox: userId=%s op=%s type=%s topic=%s path=%s',
     userId,
     operationId,
     agentType,
     topicId,
+    appEnv.CLOUD_SANDBOX_SSH_HOST ? 'ssh' : 'market',
   );
+  log('spawnHeteroSandbox: shellCommand=%s', shellCommand.slice(0, 300));
 
   if (appEnv.CLOUD_SANDBOX_SSH_HOST) {
     await sshExec(shellCommand, operationId);
@@ -231,19 +233,25 @@ function sshExec(shellCommand: string, operationId: string): Promise<void> {
     const conn = new SshClient();
 
     conn.on('ready', () => {
+      log('sshExec: SSH connected, executing op=%s', operationId);
       conn.exec(bgCommand, (err: Error | undefined, stream: NodeJS.EventEmitter) => {
         if (err) {
+          log('sshExec: exec error op=%s err=%s', operationId, err.message);
           conn.end();
           return reject(err);
         }
         stream.on('close', () => {
+          log('sshExec: SSH exec done op=%s', operationId);
           conn.end();
           resolve();
         });
       });
     });
 
-    conn.on('error', reject);
+    conn.on('error', (err: Error) => {
+      log('sshExec: SSH error op=%s err=%s', operationId, err.message);
+      reject(err);
+    });
 
     conn.connect({
       host: CLOUD_SANDBOX_SSH_HOST,

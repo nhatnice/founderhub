@@ -6,12 +6,17 @@ import {
 import { type CodeInterpreterToolName } from '@lobehub/market-sdk';
 import debug from 'debug';
 import { sha256 } from 'js-sha256';
+import { Client as SshClient } from 'ssh2';
 
+import { appEnv } from '@/envs/app';
 import { FileS3 } from '@/server/modules/S3';
 import { type FileService } from '@/server/services/file';
 import { type MarketService } from '@/server/services/market';
 
 const log = debug('lobe-server:sandbox-service');
+
+const isCommandTool = (name: string) =>
+  name === 'runCommand' || name === 'execScript' || name === 'executeCode';
 
 export interface ServerSandboxServiceOptions {
   fileService: FileService;
@@ -48,6 +53,13 @@ export class ServerSandboxService implements ISandboxService {
    * Call a sandbox tool via MarketService
    */
   async callTool(toolName: string, params: Record<string, any>): Promise<SandboxCallToolResult> {
+    const path = appEnv.CLOUD_SANDBOX_SSH_HOST && isCommandTool(toolName) ? 'ssh' : 'market';
+    log('callTool: toolName=%s topicId=%s path=%s', toolName, this.topicId, path);
+
+    if (path === 'ssh') {
+      return this.sshCallTool(toolName, params);
+    }
+
     log('Calling sandbox tool: %s with params: %O, topicId: %s', toolName, params, this.topicId);
 
     try {
@@ -90,6 +102,120 @@ export class ServerSandboxService implements ISandboxService {
         success: false,
       };
     }
+  }
+
+  /**
+   * Execute a command tool synchronously via SSH on the configured VPS.
+   * Unlike spawnHeteroSandbox (fire-and-forget), this captures stdout/stderr
+   * and resolves immediately so the LLM receives the tool result.
+   */
+  private sshCallTool(
+    toolName: string,
+    params: Record<string, any>,
+  ): Promise<SandboxCallToolResult> {
+    return new Promise((resolve) => {
+      const {
+        CLOUD_SANDBOX_SSH_HOST,
+        CLOUD_SANDBOX_SSH_PORT,
+        CLOUD_SANDBOX_SSH_USER,
+        CLOUD_SANDBOX_SSH_PRIVATE_KEY_BASE64,
+      } = appEnv;
+
+      if (
+        !CLOUD_SANDBOX_SSH_HOST ||
+        !CLOUD_SANDBOX_SSH_USER ||
+        !CLOUD_SANDBOX_SSH_PRIVATE_KEY_BASE64
+      ) {
+        return resolve({
+          error: { message: 'SSH not configured', name: 'ConfigError' },
+          result: null,
+          sessionExpiredAndRecreated: false,
+          success: false,
+        });
+      }
+
+      const privateKey = Buffer.from(CLOUD_SANDBOX_SSH_PRIVATE_KEY_BASE64, 'base64').toString(
+        'utf-8',
+      );
+
+      let shellCommand: string;
+      if (toolName === 'runCommand') {
+        shellCommand = params.command as string;
+      } else {
+        // execScript / executeCode
+        const lang = (params.language as string) || 'python3';
+        shellCommand = `${lang} -c ${JSON.stringify(params.code as string)}`;
+      }
+
+      log(
+        'sshCallTool: toolName=%s host=%s command=%s',
+        toolName,
+        CLOUD_SANDBOX_SSH_HOST,
+        shellCommand,
+      );
+
+      const conn = new SshClient();
+      conn.on('ready', () => {
+        conn.exec(
+          shellCommand,
+          (
+            err: Error | undefined,
+            stream: NodeJS.EventEmitter & { stderr: NodeJS.EventEmitter },
+          ) => {
+            if (err) {
+              log('sshCallTool error (exec): %s', err.message);
+              conn.end();
+              return resolve({
+                error: { message: err.message, name: err.name },
+                result: null,
+                sessionExpiredAndRecreated: false,
+                success: false,
+              });
+            }
+            let stdout = '';
+            let stderr = '';
+            stream.on('data', (data: Buffer) => {
+              stdout += data.toString();
+            });
+            stream.stderr.on('data', (data: Buffer) => {
+              stderr += data.toString();
+            });
+            stream.on('close', (code: number) => {
+              log(
+                'sshCallTool result: exitCode=%d stdout=%s stderr=%s',
+                code,
+                stdout.slice(0, 200),
+                stderr.slice(0, 200),
+              );
+              conn.end();
+              resolve({
+                result: { exitCode: code, output: stdout, stderr },
+                sessionExpiredAndRecreated: false,
+                success: code === 0,
+                ...(code !== 0
+                  ? { error: { message: stderr || `Exit code ${code}`, name: 'ExecError' } }
+                  : {}),
+              });
+            });
+          },
+        );
+      });
+      conn.on('error', (err: Error) => {
+        log('sshCallTool error (connection): %s', err.message);
+        resolve({
+          error: { message: err.message, name: err.name },
+          result: null,
+          sessionExpiredAndRecreated: false,
+          success: false,
+        });
+      });
+      conn.connect({
+        host: CLOUD_SANDBOX_SSH_HOST,
+        port: CLOUD_SANDBOX_SSH_PORT ?? 22,
+        privateKey,
+        username: CLOUD_SANDBOX_SSH_USER,
+      });
+    });
   }
 
   /**
