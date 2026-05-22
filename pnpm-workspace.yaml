@@ -8,6 +8,7 @@ onlyBuiltDependencies:
   - '@google/genai'
   - '@lobehub/editor'
   - '@vercel/speed-insights'
+  - ssh2
 
 overrides:
   jose: ^6.1.3

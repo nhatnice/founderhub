@@ -551,10 +551,12 @@
   "pnpm": {
     "onlyBuiltDependencies": [
       "@lobehub/editor",
-      "ffmpeg-static"
+      "ffmpeg-static",
+      "ssh2"
     ],
-    "neverBuiltDependencies": [
-      "cpu-features"
+    "ignoredOptionalDependencies": [
+      "cpu-features",
+      "nan"
     ],
     "overrides": {
       "@react-pdf/image": "3.0.4",
