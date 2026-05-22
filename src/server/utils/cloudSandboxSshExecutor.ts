@@ -24,27 +24,6 @@ import { cloudSandboxSshRun } from './cloudSandboxSshRunner';
 const log = debug('lobe-server:cloud-sandbox-ssh-executor');
 
 // ──────────────────────────────────────────────────────────────
-// The exact set of toolNames (callService literals) this executor handles.
-// Derived from ComputerRuntime.ts + CloudSandboxExecutionRuntime.ts — the
-// closed set of names that can reach ISandboxService.callTool.
-// ──────────────────────────────────────────────────────────────
-export const CLOUD_SANDBOX_SSH_TOOL_NAMES = new Set([
-  'listLocalFiles',
-  'readLocalFile',
-  'writeLocalFile',
-  'editLocalFile',
-  'searchLocalFiles',
-  'moveLocalFiles',
-  'renameLocalFile',
-  'globLocalFiles',
-  'grepContent',
-  'runCommand',
-  'getCommandOutput',
-  'killCommand',
-  'executeCode',
-]);
-
-// ──────────────────────────────────────────────────────────────
 // Internal helpers
 // ──────────────────────────────────────────────────────────────
 
@@ -462,14 +441,18 @@ async function runCommand(params: Record<string, unknown>): Promise<SandboxCallT
   if (isBackground) {
     const commandId = crypto.randomUUID();
     const dir = `/tmp/lh-sbx-${commandId}`;
-    // Write command to a file to avoid all quoting issues, then nohup it.
+    // Write command to a file to avoid all quoting issues.
+    // Use `setsid` (not `nohup`) so the background process starts in its own
+    // session and process group — this makes killpg(getpgid(pid), SIGTERM) safe
+    // and precise. nohup does not create a new process group, so getpgid would
+    // return the parent shell's PGID and kill unrelated processes.
     const cmdB64 = Buffer.from(command).toString('base64');
     const shellCmd = [
       `mkdir -p ${dir}`,
       `echo ${cmdB64} | base64 -d >${dir}/cmd.sh`,
       `chmod +x ${dir}/cmd.sh`,
-      // Start in workdir
-      `(cd ${getWorkdir()} && nohup ${dir}/cmd.sh >${dir}/log 2>&1 & echo $! >${dir}/pid && printf '0' >${dir}/offset)`,
+      // setsid gives the process its own session; redirect and background it
+      `(cd ${getWorkdir()} && setsid ${dir}/cmd.sh >${dir}/log 2>&1 & echo $! >${dir}/pid && printf '0' >${dir}/offset)`,
       `echo '{"commandId":"${commandId}"}'`,
     ].join(' && ');
 
@@ -556,6 +539,14 @@ try:
         running = True
     except (ProcessLookupError, ValueError, FileNotFoundError, PermissionError):
         running = False
+    # Auto-cleanup: when the process has finished and all output has been
+    # drained, remove the temp dir so /tmp does not accumulate stale entries.
+    if not running and not new_output:
+        try:
+            import shutil as _shutil
+            _shutil.rmtree(d, ignore_errors=True)
+        except Exception:
+            pass
     print(json.dumps({'newOutput': new_output, 'running': running}))
 except Exception as e:
     print(json.dumps({'error': str(e), 'newOutput': '', 'running': False}))
@@ -576,7 +567,8 @@ try:
         sys.exit(0)
     pid = int(open(pid_file).read().strip())
     try:
-        # Kill entire process group to also kill any children
+        # setsid ensures the background process has its own session/PGID,
+        # so killpg is safe and only affects that command's process tree.
         pgid = os.getpgid(pid)
         os.killpg(pgid, signal.SIGTERM)
     except ProcessLookupError:
@@ -587,6 +579,12 @@ try:
             os.kill(pid, signal.SIGTERM)
         except ProcessLookupError:
             pass
+    # Cleanup temp dir immediately after explicit kill
+    try:
+        import shutil as _shutil
+        _shutil.rmtree(f'/tmp/lh-sbx-{cid}', ignore_errors=True)
+    except Exception:
+        pass
     print(json.dumps({}))
 except Exception as e:
     print(json.dumps({'error': str(e)}))
@@ -599,6 +597,37 @@ except Exception as e:
 // ──────────────────────────────────────────────────────────────
 
 /**
+ * Dispatch map for all supported SSH tools.
+ * `CLOUD_SANDBOX_SSH_TOOL_NAMES` is derived from this map's keys, so adding a
+ * new tool only requires one change here — the Set and the dispatch stay in sync
+ * automatically.
+ */
+const toolHandlers: Record<
+  string,
+  (params: Record<string, unknown>) => Promise<SandboxCallToolResult>
+> = {
+  editLocalFile,
+  executeCode,
+  getCommandOutput,
+  globLocalFiles,
+  grepContent,
+  killCommand,
+  listLocalFiles,
+  moveLocalFiles,
+  readLocalFile,
+  renameLocalFile,
+  runCommand,
+  searchLocalFiles,
+  writeLocalFile,
+};
+
+/**
+ * The exact set of toolNames this SSH executor handles.
+ * Derived from `toolHandlers` — stays in sync automatically.
+ */
+export const CLOUD_SANDBOX_SSH_TOOL_NAMES = new Set(Object.keys(toolHandlers));
+
+/**
  * Route a CloudSandbox tool call through SSH to the configured VPS.
  * Only call this when isCloudSandboxSshConfigured() is true and
  * CLOUD_SANDBOX_SSH_TOOL_NAMES.has(toolName) is true.
@@ -608,65 +637,38 @@ export async function runCloudSandboxToolViaSsh(
   params: Record<string, unknown>,
 ): Promise<SandboxCallToolResult> {
   log('runCloudSandboxToolViaSsh: tool=%s', toolName);
-
-  switch (toolName) {
-    case 'listLocalFiles': {
-      return listLocalFiles(params);
-    }
-    case 'readLocalFile': {
-      return readLocalFile(params);
-    }
-    case 'writeLocalFile': {
-      return writeLocalFile(params);
-    }
-    case 'editLocalFile': {
-      return editLocalFile(params);
-    }
-    case 'searchLocalFiles': {
-      return searchLocalFiles(params);
-    }
-    case 'moveLocalFiles': {
-      return moveLocalFiles(params);
-    }
-    case 'renameLocalFile': {
-      return renameLocalFile(params);
-    }
-    case 'globLocalFiles': {
-      return globLocalFiles(params);
-    }
-    case 'grepContent': {
-      return grepContent(params);
-    }
-    case 'runCommand': {
-      return runCommand(params);
-    }
-    case 'getCommandOutput': {
-      return getCommandOutput(params);
-    }
-    case 'killCommand': {
-      return killCommand(params);
-    }
-    case 'executeCode': {
-      return executeCode(params);
-    }
-    default: {
-      log('runCloudSandboxToolViaSsh: unknown tool %s, returning error', toolName);
-      return fail(`SSH executor does not support tool: ${toolName}`);
-    }
+  const handler = toolHandlers[toolName];
+  if (!handler) {
+    log('runCloudSandboxToolViaSsh: unknown tool %s', toolName);
+    return fail(`SSH executor does not support tool: ${toolName}`);
   }
+  return handler(params);
 }
 
 /**
  * Read a file from the VPS sandbox via SSH.
  * Returns the raw Buffer of the file for S3 upload.
  * Throws if the file does not exist or SSH fails.
+ *
+ * The file path is embedded as a base64 blob inside a Python script — the same
+ * injection-safe pattern used by all 13 structured tools — so arbitrary filePath
+ * values (including those containing $(), backticks, or shell metacharacters)
+ * cannot be executed by the shell.
  */
 export async function exportFileViaSsh(filePath: string): Promise<Buffer> {
   log('exportFileViaSsh: path=%s', filePath);
-  // Use base64 to safely transfer arbitrary binary content over SSH stdout.
-  // -w0 disables line-wrapping so the output is a single continuous base64 string.
-  const safePathArg = JSON.stringify(filePath);
-  const { exitCode, stderr, stdout } = await cloudSandboxSshRun(`base64 -w0 ${safePathArg}`);
+  const pathB64 = Buffer.from(filePath).toString('base64');
+  const script = [
+    'import base64, sys',
+    `path = base64.b64decode('${pathB64}').decode('utf-8')`,
+    'with open(path, "rb") as f:',
+    '    data = f.read()',
+    'print(base64.b64encode(data).decode("ascii"))',
+  ].join('\n');
+  const scriptB64 = Buffer.from(script).toString('base64');
+  const { exitCode, stderr, stdout } = await cloudSandboxSshRun(
+    `echo ${scriptB64} | base64 -d | python3`,
+  );
   if (exitCode !== 0) {
     throw new Error(stderr.trim() || `Failed to read file from VPS: ${filePath}`);
   }
