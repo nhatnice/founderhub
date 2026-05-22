@@ -69,6 +69,10 @@ ENV NODE_OPTIONS="--max-old-space-size=8192"
 
 WORKDIR /app
 
+# git is required by the root prepare script (git config core.hooksPath .githooks)
+# Only needed in builder stage — not copied to final image
+RUN apt update && apt install -qy git && rm -rf /var/lib/apt/lists/*
+
 COPY package.json pnpm-workspace.yaml ./
 COPY .npmrc ./
 COPY packages ./packages
