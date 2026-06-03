@@ -61,6 +61,14 @@ export const getAppConfig = () => {
       SSRF_ALLOW_IP_ADDRESS_LIST: z.string().optional(),
 
       MARKET_BASE_URL: z.string().optional(),
+
+      CLOUD_SANDBOX_SSH_HOST: z.string().optional(),
+      CLOUD_SANDBOX_SSH_PORT: z.coerce.number().int().min(1).max(65535).optional(),
+      CLOUD_SANDBOX_SSH_USER: z.string().optional(),
+      /** Base64-encoded PEM private key. Generate: base64 < ~/.ssh/id_rsa | tr -d '\n' */
+      CLOUD_SANDBOX_SSH_PRIVATE_KEY_BASE64: z.string().optional(),
+      /** Working directory on the VPS used for all sandbox tool calls. Defaults to /workspace. */
+      CLOUD_SANDBOX_SSH_WORKDIR: z.string().optional(),
       /**
        * Trusted Client Secret for Market API authentication
        * 64-character hex string (32 bytes) shared with Market server
@@ -116,6 +124,12 @@ export const getAppConfig = () => {
       SSRF_ALLOW_PRIVATE_IP_ADDRESS: process.env.SSRF_ALLOW_PRIVATE_IP_ADDRESS === '1',
       SSRF_ALLOW_IP_ADDRESS_LIST: process.env.SSRF_ALLOW_IP_ADDRESS_LIST,
       MARKET_BASE_URL: process.env.MARKET_BASE_URL,
+
+      CLOUD_SANDBOX_SSH_HOST: process.env.CLOUD_SANDBOX_SSH_HOST,
+      CLOUD_SANDBOX_SSH_PORT: process.env.CLOUD_SANDBOX_SSH_PORT,
+      CLOUD_SANDBOX_SSH_USER: process.env.CLOUD_SANDBOX_SSH_USER,
+      CLOUD_SANDBOX_SSH_PRIVATE_KEY_BASE64: process.env.CLOUD_SANDBOX_SSH_PRIVATE_KEY_BASE64,
+      CLOUD_SANDBOX_SSH_WORKDIR: process.env.CLOUD_SANDBOX_SSH_WORKDIR,
 
       MARKET_TRUSTED_CLIENT_SECRET: process.env.MARKET_TRUSTED_CLIENT_SECRET,
       MARKET_TRUSTED_CLIENT_ID: process.env.MARKET_TRUSTED_CLIENT_ID,

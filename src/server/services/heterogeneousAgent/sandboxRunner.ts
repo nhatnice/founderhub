@@ -2,6 +2,10 @@ import debug from 'debug';
 
 import { appEnv } from '@/envs/app';
 import type { MarketService } from '@/server/services/market';
+import {
+  cloudSandboxSshDispatch,
+  isCloudSandboxSshConfigured,
+} from '@/server/utils/cloudSandboxSshRunner';
 
 const log = debug('lobe-server:hetero-sandbox-runner');
 
@@ -179,14 +183,20 @@ export async function spawnHeteroSandbox(params: SandboxRunParams): Promise<void
     setupParts.length > 0 ? `${setupParts.join(' && \\\n')} && \\\n${mainCommand}` : mainCommand;
 
   log(
-    'spawnHeteroSandbox: userId=%s op=%s type=%s topic=%s',
+    'spawnHeteroSandbox: userId=%s op=%s type=%s topic=%s path=%s',
     userId,
     operationId,
     agentType,
     topicId,
+    isCloudSandboxSshConfigured() ? 'ssh' : 'market',
   );
+  log('spawnHeteroSandbox: shellCommand=%s', shellCommand.slice(0, 300));
 
-  await marketService
-    .getSDK()
-    .plugins.runBuildInTool('runCommand', { command: shellCommand } as any, { topicId, userId });
+  if (isCloudSandboxSshConfigured()) {
+    await cloudSandboxSshDispatch(shellCommand, operationId);
+  } else {
+    await marketService
+      .getSDK()
+      .plugins.runBuildInTool('runCommand', { command: shellCommand } as any, { topicId, userId });
+  }
 }
