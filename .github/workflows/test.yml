@@ -3,7 +3,7 @@ name: Test CI
 on:
   pull_request:
     types: [closed]
-    branches: [founderhub]
+    branches: [main]
 
 permissions:
   actions: write

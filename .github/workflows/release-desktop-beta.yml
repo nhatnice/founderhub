@@ -30,7 +30,7 @@ jobs:
   check-beta:
     name: Check if Beta Release
     runs-on: ubuntu-latest
-    if: ${{ !contains(github.event.release.target_commitish, 'founderhub') }}
+    if: ${{ !contains(github.event.release.target_commitish, 'main') }}
     outputs:
       is_beta: ${{ steps.check.outputs.is_beta }}
       version: ${{ steps.check.outputs.version }}

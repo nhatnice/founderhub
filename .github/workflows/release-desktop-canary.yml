@@ -44,7 +44,7 @@ jobs:
   calculate-version:
     name: Calculate Canary Version
     runs-on: ubuntu-latest
-    if: ${{ github.ref_name != 'founderhub' }}
+    if: ${{ github.ref_name != 'main' }}
     outputs:
       release_notes: ${{ steps.release-notes.outputs.release_notes }}
       version: ${{ steps.version.outputs.version }}

@@ -17,7 +17,7 @@ concurrency:
 jobs:
   release:
     name: Release
-    if: ${{ !contains(github.ref_name, '-') && !contains(github.event.base_ref, 'founderhub') }}
+    if: ${{ !contains(github.ref_name, '-') && !contains(github.event.base_ref, 'main') }}
     runs-on: ubuntu-latest
 
     services:
