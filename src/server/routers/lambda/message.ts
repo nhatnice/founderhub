@@ -4,6 +4,7 @@ import {
   UpdateMessagePluginSchema,
   UpdateMessageRAGParamsSchema,
 } from '@lobechat/types';
+import { createTimingHelpers, createTimingRequestId } from '@lobechat/utils';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 
@@ -17,6 +18,8 @@ import { MessageService } from '@/server/services/message';
 
 import { resolveAgentIdFromSession, resolveContext } from './_helpers/resolveContext';
 import { basicContextSchema } from './_schema/context';
+
+const { logTiming, runTimedStage } = createTimingHelpers('lobe-server:chat:lobehub:timing');
 
 const messageProcedure = authedProcedure.use(serverDatabase).use(async (opts) => {
   const { ctx } = opts;
@@ -176,6 +179,10 @@ export const messageRouter = router({
     return ctx.messageModel.getHeatmaps();
   }),
 
+  getTokenHeatmaps: messageProcedure.query(async ({ ctx }) => {
+    return ctx.messageModel.getTokenHeatmaps();
+  }),
+
   getMessages: publicProcedure
     .use(serverDatabase)
     .input(
@@ -207,7 +214,8 @@ export const messageRouter = router({
         return messageModel.query(
           { ...queryParams, topicId: share.topicId },
           {
-            postProcessUrl: (path) => fileService.getFullFileUrl(path),
+            postProcessUrl: (path, file) =>
+              fileService.getFileAccessUrl({ id: file.id, url: path }),
           },
         );
       }
@@ -221,7 +229,7 @@ export const messageRouter = router({
       const fileService = new FileService(ctx.serverDB, ctx.userId);
 
       return messageModel.query(queryParams, {
-        postProcessUrl: (path) => fileService.getFullFileUrl(path),
+        postProcessUrl: (path, file) => fileService.getFileAccessUrl({ id: file.id, url: path }),
       });
     }),
 
@@ -316,9 +324,37 @@ export const messageRouter = router({
     )
     .mutation(async ({ input, ctx }) => {
       const { id, value, agentId, ...options } = input;
-      const resolved = await resolveContext({ agentId, ...options }, ctx.serverDB, ctx.userId);
+      const timingContext = { requestId: createTimingRequestId(), startedAt: Date.now() };
+      logTiming(timingContext, 'lambda.message.update:start', {
+        hasAgentId: !!agentId,
+        hasTopicId: !!options.topicId,
+        valueKeys: Object.keys(value ?? {}),
+      });
 
-      return ctx.messageService.updateMessage(id, value as any, resolved);
+      const resolved = await runTimedStage(
+        timingContext,
+        'lambda.message.update.resolveContext',
+        () => resolveContext({ agentId, ...options }, ctx.serverDB, ctx.userId),
+        { hasAgentId: !!agentId },
+      );
+
+      const result = await runTimedStage(
+        timingContext,
+        'lambda.message.update.service',
+        () =>
+          ctx.messageService.updateMessage(id, value as any, {
+            ...resolved,
+            timingRequestId: timingContext.requestId,
+            timingStartedAt: timingContext.startedAt,
+          }),
+        { hasResolvedTopicId: !!resolved.topicId },
+      );
+
+      logTiming(timingContext, 'lambda.message.update:done', {
+        messageCount: result.messages?.length ?? 0,
+        success: result.success,
+      });
+      return result;
     }),
 
   /**

@@ -2,37 +2,26 @@
 
 # Changelog
 
-## FounderHub Version 2.0.0+1
+## [Version 2.2.1](https://github.com/lobehub/lobe-chat/compare/v0.0.0-nightly.pr15228.13999...v2.2.1)
 
-<sup>Released on **2026-05-22**</sup>
+<sup>Released on **2026-05-29**</sup>
 
 #### ✨ Features
 
-- **about**: Add "In development by NHAT TRAN" badge on version in settings/about page.
-- **sandbox**: Cloud Sandbox SSH — route LobeHub market cloud execution to self-hosted VPS via SSH.
-
-#### 👷 Workflows
-
-- **sync-fork**: Auto-sync `main` and `canary` branches from upstream `lobehub/lobe-chat`.
-- **e2e, test**: Restrict CI to run only on merged pull requests targeting `founderhub` branch.
+- **device**: device registry TRPC (register / list / update / remove).
+- **bot**: add iMessage Desktop setup and bridge.
+- **desktop**: show zoom level HUD on Cmd+/- and Cmd+0.
 
 <br/>
 
 <details>
 <summary><kbd>Improvements and Fixes</kbd></summary>
 
-#### Features
+#### What's improved
 
-- **about**: Add dev badge on version for custom build identification ([1d99536](https://github.com/nhatnice/founderhub/commit/1d99536fec))
-- **sandbox**: Add SSH-based VPS execution for hetero agents; fallback to MarketSDK when `CLOUD_SANDBOX_SSH_HOST` is unset ([f3e0e16](https://github.com/nhatnice/founderhub/commit/f3e0e162c9))
-- **env**: Document self-hosted cloud sandbox SSH env vars in `.env.example` ([eff227a](https://github.com/nhatnice/founderhub/commit/eff227abf4))
-- **sandbox**: Route Cloud Sandbox UI tools (`runCommand`, `execScript`, `executeCode`) through SSH VPS ([5fe797a](https://github.com/nhatnice/founderhub/commit/5fe797ae41))
-- **sandbox**: Extract shared `cloudSandboxSshRunner` utility (`isCloudSandboxSshConfigured`, `cloudSandboxSshRun`, `cloudSandboxSshDispatch`) ([3505e01](https://github.com/nhatnice/founderhub/commit/3505e01ccf))
-
-#### Workflows
-
-- **sync-fork**: Add `.github/workflows/sync-fork.yml` — auto-sync `main`/`canary` from upstream and open PR on changes ([908c5ed](https://github.com/nhatnice/founderhub/commit/908c5edbc5))
-- **e2e, test**: Change trigger from `[push, pull_request]` to `pull_request` on `founderhub` branch (merged PRs only) ([c9abbc4](https://github.com/nhatnice/founderhub/commit/c9abbc4558))
+- **device**: device registry TRPC (register / list / update / remove), closes [#15299](https://github.com/lobehub/lobe-chat/issues/15299) ([671b252](https://github.com/lobehub/lobe-chat/commit/671b252))
+- **bot**: add iMessage Desktop setup and bridge, closes [#15228](https://github.com/lobehub/lobe-chat/issues/15228) ([6d94635](https://github.com/lobehub/lobe-chat/commit/6d94635))
+- **desktop**: show zoom level HUD on Cmd+/- and Cmd+0, closes [#15294](https://github.com/lobehub/lobe-chat/issues/15294) ([109545c](https://github.com/lobehub/lobe-chat/commit/109545c))
 
 </details>
 

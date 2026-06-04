@@ -6,8 +6,11 @@ import { getAgentStoreState } from '@/store/agent';
 import { agentSelectors, builtinAgentSelectors } from '@/store/agent/selectors';
 import { getChatGroupStoreState } from '@/store/agentGroup';
 import { useChatStore } from '@/store/chat';
+import { useGlobalStore } from '@/store/global';
+import { useGroupProfileStore } from '@/store/groupProfile';
 import { type HomeStore } from '@/store/home/store';
 import { type StoreSetter } from '@/store/types';
+import { markdownToTxt } from '@/utils/markdownToTxt';
 import { getStableNavigate } from '@/utils/stableNavigate';
 import { setNamespace } from '@/utils/storeDebug';
 
@@ -81,10 +84,14 @@ export class HomeInputActionImpl {
           model,
           provider,
           systemRole: message,
-          title: message?.slice(0, 50) || 'New Agent',
+          title: markdownToTxt(message ?? '').slice(0, 50) || 'New Agent',
         },
         groupId,
       });
+
+      if (message.trim()) {
+        useGlobalStore.getState().toggleAgentBuilderPanel(true);
+      }
 
       // 3. Navigate to Agent profile page
       getStableNavigate()?.(`/agent/${result.agentId}/profile`);
@@ -147,7 +154,7 @@ export class HomeInputActionImpl {
           systemPrompt: message,
         },
         groupId,
-        title: message?.slice(0, 50) || 'New Group',
+        title: markdownToTxt(message ?? '').slice(0, 50) || 'New Group',
       });
 
       // 3. Load groups and refresh
@@ -156,6 +163,10 @@ export class HomeInputActionImpl {
 
       // 4. Refresh sidebar agent list
       this.#get().refreshAgentList();
+
+      if (message.trim()) {
+        useGroupProfileStore.getState().setChatPanelExpanded(true);
+      }
 
       // 5. Navigate to Group profile page
       getStableNavigate()?.(`/group/${group.id}/profile`);
@@ -215,7 +226,7 @@ export class HomeInputActionImpl {
       const newDoc = await documentService.createDocument({
         editorData: '{}',
         fileType: 'custom/document',
-        title: message?.slice(0, 50) || 'Untitled',
+        title: markdownToTxt(message ?? '').slice(0, 50) || 'Untitled',
       });
 
       // 3. Navigate to Page

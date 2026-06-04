@@ -29,7 +29,7 @@ export interface PortalFile {
 export type PortalViewData =
   | { type: PortalViewType.Home }
   | { artifact: PortalArtifact; type: PortalViewType.Artifact }
-  | { documentId: string; type: PortalViewType.Document }
+  | { agentDocumentId?: string; documentId: string; type: PortalViewType.Document }
   | { type: PortalViewType.Notebook }
   | { file: PortalFile; type: PortalViewType.FilePreview }
   | { type: PortalViewType.LocalFile }
@@ -43,6 +43,9 @@ export type PortalViewData =
 export interface ChatPortalState {
   /** Path of the currently active tab; undefined when no tabs open. */
   activeLocalFilePath?: string;
+
+  /** Unsaved edit buffers keyed by file path. Presence implies the file is dirty. */
+  dirtyLocalFileContents: Record<string, string>;
 
   // Legacy fields (kept for backward compatibility during migration)
   // TODO: Remove after Phase 3 migration complete
@@ -69,6 +72,7 @@ export interface ChatPortalState {
 }
 
 export const initialChatPortalState: ChatPortalState = {
+  dirtyLocalFileContents: {},
   openLocalFiles: [],
   portalArtifactDisplayMode: ArtifactDisplayMode.Preview,
   portalStack: [],

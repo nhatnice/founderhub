@@ -1,4 +1,4 @@
-import { type AgentItem, type LobeAgentConfig } from '@lobechat/types';
+import { type AgentItem, type AgentRankItem, type LobeAgentConfig } from '@lobechat/types';
 import { type PartialDeep } from 'type-fest';
 
 import { lambdaClient } from '@/libs/trpc/client';
@@ -216,6 +216,13 @@ class AgentService {
   };
 
   /**
+   * Count non-virtual agents with optional keyword filter, matching queryAgents conditions.
+   */
+  countAgents = async (params?: { keyword?: string }) => {
+    return lambdaClient.agent.countAgents.query(params);
+  };
+
+  /**
    * Pin or unpin an agent
    */
   updateAgentPinned = async (agentId: string, pinned: boolean) => {
@@ -231,6 +238,13 @@ class AgentService {
     newTitle?: string,
   ): Promise<{ agentId: string } | null> => {
     return lambdaClient.agent.duplicateAgent.mutate({ agentId, newTitle });
+  };
+
+  /**
+   * Rank the user's agents by topic count (agent usage ranking).
+   */
+  rankAgents = async (limit?: number): Promise<AgentRankItem[]> => {
+    return lambdaClient.agent.rankAgents.query(limit);
   };
 }
 

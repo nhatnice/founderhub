@@ -8,9 +8,18 @@ import { FileModel } from '@/database/models/file';
 import { type FileItem } from '@/database/schemas';
 import { appEnv } from '@/envs/app';
 import { TempFileManager } from '@/server/utils/tempFileManager';
+import { isDev } from '@/utils/env';
 
 import { createFileServiceModule } from './impls';
 import { type FileServiceImpl } from './impls/type';
+
+export const getFileProxyUrl = (fileId: string): string => `${appEnv.APP_URL}/f/${fileId}`;
+
+export interface FileAccessUrlItem {
+  fileId?: string | null;
+  id?: string | null;
+  url?: string | null;
+}
 
 /**
  * File service class
@@ -81,6 +90,16 @@ export class FileService {
   }
 
   /**
+   * Create cached pre-signed preview URL
+   */
+  public async createCachedPreSignedUrlForPreview(
+    url?: string | null,
+    expiresIn?: number,
+  ): Promise<string> {
+    return this.impl.createCachedPreSignedUrlForPreview(url, expiresIn);
+  }
+
+  /**
    * Upload content
    */
   public async uploadContent(path: string, content: string) {
@@ -92,6 +111,21 @@ export class FileService {
    */
   public async getFullFileUrl(url?: string | null, expiresIn?: number): Promise<string> {
     return this.impl.getFullFileUrl(url, expiresIn);
+  }
+
+  /**
+   * Resolve a file URL for consumers that need to read the file.
+   * Production uses the stable file proxy URL; local development falls back to
+   * the storage URL so remote model providers can download local test files.
+   */
+  public async getFileAccessUrl(file: FileAccessUrlItem): Promise<string> {
+    const fileId = file.fileId || file.id;
+
+    if (!isDev && fileId) {
+      return getFileProxyUrl(fileId);
+    }
+
+    return this.getFullFileUrl(file.url);
   }
 
   /**
@@ -119,6 +153,16 @@ export class FileService {
     return this.impl.uploadBuffer(key, buffer, contentType);
   }
 
+  private async isStoredFileAvailable(url: string): Promise<boolean> {
+    try {
+      await this.getFileMetadata(url);
+      return true;
+    } catch (error) {
+      console.error('Failed to verify existing file hash storage object:', error);
+      return false;
+    }
+  }
+
   /**
    * Create file record (common method)
    * Automatically handles globalFiles deduplication logic
@@ -137,7 +181,22 @@ export class FileService {
     url: string;
   }): Promise<{ fileId: string; url: string }> {
     // Check if hash already exists in globalFiles
-    const { isExist } = await this.fileModel.checkHash(params.fileHash);
+    const existingFile = await this.fileModel.checkHash(params.fileHash);
+    const { isExist } = existingFile;
+
+    let shouldRefreshGlobalFile = false;
+    if (isExist && existingFile.url && existingFile.url !== params.url) {
+      shouldRefreshGlobalFile = !(await this.isStoredFileAvailable(existingFile.url));
+    }
+
+    if (shouldRefreshGlobalFile) {
+      // Keep global hash dedup usable when the same file is uploaded again to a
+      // fresh object key after the previous storage object has been removed.
+      await this.fileModel.updateGlobalFile(params.fileHash, {
+        metadata: params.metadata,
+        url: params.url,
+      });
+    }
 
     // Create database record
     // If hash doesn't exist, also create globalFiles record
@@ -154,10 +213,9 @@ export class FileService {
       !isExist, // insertToGlobalFiles
     );
 
-    // Return unified proxy URL: ${APP_URL}/f/:id
     return {
       fileId: id,
-      url: `${appEnv.APP_URL}/f/${id}`,
+      url: await this.getFileAccessUrl({ id, url: params.url }),
     };
   }
 

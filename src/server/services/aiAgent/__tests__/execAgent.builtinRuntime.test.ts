@@ -11,6 +11,8 @@ import { AiAgentService } from '../index';
 const {
   mockCreateOperation,
   mockGetAgentConfig,
+  mockGetBuiltinAgent,
+  mockGetInfoForAIGeneration,
   mockIsAgentSignalEnabledForUser,
   mockMessageCreate,
   mockMessageQuery,
@@ -19,6 +21,8 @@ const {
 } = vi.hoisted(() => ({
   mockCreateOperation: vi.fn(),
   mockGetAgentConfig: vi.fn(),
+  mockGetBuiltinAgent: vi.fn(),
+  mockGetInfoForAIGeneration: vi.fn(),
   mockIsAgentSignalEnabledForUser: vi.fn(),
   mockMessageCreate: vi.fn(),
   mockMessageQuery: vi.fn(),
@@ -50,6 +54,7 @@ vi.mock('@/database/models/message', () => ({
 vi.mock('@/database/models/agent', () => ({
   AgentModel: vi.fn().mockImplementation(() => ({
     getAgentConfig: vi.fn(),
+    getBuiltinAgent: mockGetBuiltinAgent,
     queryAgents: vi.fn().mockResolvedValue([]),
   })),
 }));
@@ -96,6 +101,12 @@ vi.mock('@/database/models/thread', () => ({
     findById: vi.fn(),
     update: vi.fn(),
   })),
+}));
+
+vi.mock('@/database/models/user', () => ({
+  UserModel: {
+    getInfoForAIGeneration: mockGetInfoForAIGeneration,
+  },
 }));
 
 vi.mock('@/database/models/task', () => ({
@@ -179,6 +190,10 @@ describe('AiAgentService.execAgent - builtin agent runtime config', () => {
     mockMessageQuery.mockResolvedValue([]);
     mockIsAgentSignalEnabledForUser.mockResolvedValue(true);
     mockResolveTask.mockResolvedValue(null);
+    mockGetInfoForAIGeneration.mockResolvedValue({
+      responseLanguage: 'en-US',
+      userName: 'Test User',
+    });
     mockToolsEnv.VISUAL_UNDERSTANDING_MODEL = 'vision-model';
     mockToolsEnv.VISUAL_UNDERSTANDING_PROVIDER = 'test-provider';
     mockCreateOperation.mockResolvedValue({
@@ -187,7 +202,40 @@ describe('AiAgentService.execAgent - builtin agent runtime config', () => {
       operationId: 'op-123',
       success: true,
     });
+    mockGetBuiltinAgent.mockResolvedValue(null);
     service = new AiAgentService(mockDb, userId);
+  });
+
+  it('materializes a builtin agent addressed by slug when no row exists yet', async () => {
+    // Background self-iteration runs dispatch via execAgent({ slug }) before any
+    // persisted row exists. The first resolve (by slug) misses; execAgent must
+    // lazily materialize the virtual builtin row (getBuiltinAgent) and re-resolve
+    // — without it the run throws `Agent not found: self-reflection`.
+    mockGetAgentConfig.mockResolvedValueOnce(null).mockResolvedValueOnce({
+      chatConfig: {},
+      id: 'agent-self-reflection',
+      model: 'gpt-4',
+      plugins: [],
+      provider: 'openai',
+      slug: 'self-reflection',
+      systemRole: '',
+    });
+    mockGetBuiltinAgent.mockResolvedValueOnce({ id: 'agent-self-reflection', slug: 'self-reflection' });
+
+    await service.execAgent({ prompt: 'reflect', slug: 'self-reflection' });
+
+    expect(mockGetBuiltinAgent).toHaveBeenCalledWith('self-reflection');
+    expect(mockCreateOperation).toHaveBeenCalledTimes(1);
+    expect(mockCreateOperation.mock.calls[0][0].agentConfig.slug).toBe('self-reflection');
+  });
+
+  it('throws for an unknown non-builtin identifier without materializing a row', async () => {
+    mockGetAgentConfig.mockResolvedValue(null);
+
+    await expect(service.execAgent({ agentId: 'does-not-exist', prompt: 'hi' })).rejects.toThrow(
+      'Agent not found: does-not-exist',
+    );
+    expect(mockGetBuiltinAgent).not.toHaveBeenCalled();
   });
 
   it('should merge runtime systemRole for inbox agent when DB systemRole is empty', async () => {
@@ -212,6 +260,33 @@ describe('AiAgentService.execAgent - builtin agent runtime config', () => {
     const callArgs = mockCreateOperation.mock.calls[0][0];
     expect(callArgs.agentConfig.systemRole).toContain('You are Lobe');
     expect(callArgs.agentConfig.systemRole).toContain('{{model}}');
+  });
+
+  it('should pass user response language into web onboarding runtime systemRole', async () => {
+    mockGetInfoForAIGeneration.mockResolvedValue({
+      responseLanguage: 'zh-CN',
+      userName: 'Test User',
+    });
+    mockGetAgentConfig.mockResolvedValue({
+      chatConfig: {},
+      id: 'agent-web-onboarding',
+      model: 'gpt-4',
+      plugins: [],
+      provider: 'openai',
+      slug: 'web-onboarding',
+      systemRole: '',
+    });
+
+    await service.execAgent({
+      agentId: 'agent-web-onboarding',
+      prompt: '你好',
+    });
+
+    const callArgs = mockCreateOperation.mock.calls[0][0];
+    expect(callArgs.agentConfig.systemRole).toContain('Preferred reply language: zh-CN');
+    expect(callArgs.agentConfig.systemRole).toContain(
+      'Every visible reply, question, and visible choice label must be entirely in zh-CN',
+    );
   });
 
   it('should NOT override user-customized systemRole for inbox agent', async () => {

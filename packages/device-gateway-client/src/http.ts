@@ -1,4 +1,7 @@
-import type { DeviceAttachment, DeviceSystemInfo } from './types';
+import type { DeviceSystemInfo, GatewayDevice } from './types';
+
+const DEFAULT_GATEWAY_TOOL_CALL_TIMEOUT_MS = 30_000;
+const HTTP_CALL_TIMEOUT_PADDING_MS = 30_000;
 
 export interface DeviceStatusResult {
   deviceCount: number;
@@ -6,6 +9,13 @@ export interface DeviceStatusResult {
 }
 
 export interface DeviceToolCallResult {
+  content: string;
+  error?: string;
+  state?: unknown;
+  success: boolean;
+}
+
+export interface DeviceMessageApiResult {
   content: string;
   error?: string;
   success: boolean;
@@ -36,7 +46,7 @@ export class GatewayHttpClient {
     };
   }
 
-  async queryDeviceList(userId: string): Promise<DeviceAttachment[]> {
+  async queryDeviceList(userId: string): Promise<GatewayDevice[]> {
     const res = await this.post('/api/device/devices', { userId });
     if (!res.ok) return [];
 
@@ -48,17 +58,67 @@ export class GatewayHttpClient {
     params: { deviceId?: string; timeout?: number; userId: string },
     toolCall: { apiName: string; arguments: string; identifier: string },
   ): Promise<DeviceToolCallResult> {
-    const res = await this.post('/api/device/tool-call', {
+    const timeout =
+      typeof params.timeout === 'number' && Number.isFinite(params.timeout)
+        ? Math.max(Math.trunc(params.timeout), 0)
+        : DEFAULT_GATEWAY_TOOL_CALL_TIMEOUT_MS;
+    const res = await this.post(
+      '/api/device/tool-call',
+      {
+        deviceId: params.deviceId,
+        timeout: params.timeout,
+        toolCall,
+        userId: params.userId,
+      },
+      { timeout: timeout + HTTP_CALL_TIMEOUT_PADDING_MS },
+    );
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      return {
+        content: `Device tool call failed (HTTP ${res.status})`,
+        error: text || `HTTP ${res.status}`,
+        success: false,
+      };
+    }
+
+    const data = await res.json();
+    return {
+      // Device sends a typed envelope ({ content, state, success }). The legacy
+      // fallback used to JSON.stringify `data.content ?? data` — when content
+      // was missing it would stringify the *entire response body* including
+      // `success` and any other top-level fields, which leaked the structured
+      // payload into the LLM-facing content string. Only stringify the
+      // `content` field itself; never fall back to the whole body.
+      content:
+        typeof data.content === 'string'
+          ? data.content
+          : data.content !== undefined && data.content !== null
+            ? JSON.stringify(data.content)
+            : typeof data.error === 'string'
+              ? data.error
+              : '',
+      error: data.error,
+      state: data.state,
+      success: data.success ?? true,
+    };
+  }
+
+  async executeMessageApi(
+    params: { deviceId?: string; timeout?: number; userId: string },
+    api: { apiName: string; payload: Record<string, unknown>; platform: string },
+  ): Promise<DeviceMessageApiResult> {
+    const res = await this.post('/api/device/message-api', {
+      api,
       deviceId: params.deviceId,
       timeout: params.timeout,
-      toolCall,
       userId: params.userId,
     });
 
     if (!res.ok) {
       const text = await res.text().catch(() => '');
       return {
-        content: `Device tool call failed (HTTP ${res.status})`,
+        content: `Device message API call failed (HTTP ${res.status})`,
         error: text || `HTTP ${res.status}`,
         success: false,
       };
@@ -74,19 +134,19 @@ export class GatewayHttpClient {
   }
 
   async dispatchAgentRun(params: {
-    agentType: 'claude-code' | 'codex';
+    agentType: string;
     cwd?: string;
     deviceId?: string;
     jwt: string;
     operationId: string;
     prompt: string;
     resumeSessionId?: string;
+    systemContext?: string;
     timeout?: number;
     topicId: string;
     userId: string;
   }): Promise<{ success: boolean; error?: string }> {
-    const { userId: _userId, ...body } = params;
-    const res = await this.post('/api/device/agent/run', body);
+    const res = await this.post('/api/device/agent/run', params);
     if (!res.ok) {
       const text = await res.text().catch(() => '');
       return { error: text || `HTTP ${res.status}`, success: false };
@@ -110,7 +170,7 @@ export class GatewayHttpClient {
     };
   }
 
-  private post(path: string, body: unknown): Promise<Response> {
+  private post(path: string, body: unknown, options?: { timeout?: number }): Promise<Response> {
     return fetch(`${this.gatewayUrl}${path}`, {
       body: JSON.stringify(body),
       headers: {
@@ -118,6 +178,7 @@ export class GatewayHttpClient {
         'Content-Type': 'application/json',
       },
       method: 'POST',
+      ...(options?.timeout ? { signal: AbortSignal.timeout(options.timeout) } : {}),
     });
   }
 }

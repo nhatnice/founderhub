@@ -1,6 +1,7 @@
 import type { ChatTopicStatus } from '@lobechat/types';
 import { type MenuProps } from '@lobehub/ui';
 import { Icon } from '@lobehub/ui';
+import { confirmModal } from '@lobehub/ui/base-ui';
 import { App } from 'antd';
 import {
   CheckCircle2,
@@ -23,7 +24,6 @@ import { useNavigate } from 'react-router-dom';
 import { openRenameModal } from '@/components/RenameModal';
 import { SESSION_CHAT_TOPIC_URL } from '@/const/url';
 import { isDesktop } from '@/const/version';
-import { pluginRegistry } from '@/features/Electron/titlebar/RecentlyViewed/plugins';
 import { openShareModal } from '@/features/ShareModal';
 import { useAppOrigin } from '@/hooks/useAppOrigin';
 import { useAgentStore } from '@/store/agent';
@@ -45,7 +45,7 @@ export const useTopicItemDropdownMenu = ({
   title,
 }: TopicItemDropdownMenuProps) => {
   const { t } = useTranslation(['topic', 'common']);
-  const { modal, message } = App.useApp();
+  const { message } = App.useApp();
   const navigate = useNavigate();
 
   const openTopicInNewWindow = useGlobalStore((s) => s.openTopicInNewWindow);
@@ -143,11 +143,8 @@ export const useTopicItemDropdownMenu = ({
               onClick: () => {
                 if (!activeAgentId) return;
                 const url = SESSION_CHAT_TOPIC_URL(activeAgentId, id);
-                const reference = pluginRegistry.parseUrl(url, '');
-                if (reference) {
-                  addTab(reference);
-                  navigate(url);
-                }
+                addTab(url);
+                navigate(url);
               },
             },
             {
@@ -209,13 +206,15 @@ export const useTopicItemDropdownMenu = ({
         key: 'delete',
         label: t('delete', { ns: 'common' }),
         onClick: () => {
-          modal.confirm({
-            centered: true,
+          confirmModal({
+            cancelText: t('cancel', { ns: 'common' }),
+            content: t('actions.confirmRemoveTopic'),
             okButtonProps: { danger: true },
+            okText: t('delete', { ns: 'common' }),
             onOk: async () => {
               await removeTopic(id);
             },
-            title: t('actions.confirmRemoveTopic'),
+            title: t('delete', { ns: 'common' }),
           });
         },
       },
@@ -238,7 +237,6 @@ export const useTopicItemDropdownMenu = ({
     addTab,
     navigate,
     t,
-    modal,
     message,
     handleOpenShareModal,
   ]);

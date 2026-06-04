@@ -25,11 +25,13 @@ import messenger from './messenger';
 import metadata from './metadata';
 import migration from './migration';
 import modelProvider from './modelProvider';
+import modelRuntime from './modelRuntime';
 import models from './models';
 import notification from './notification';
 import oauth from './oauth';
 import onboarding from './onboarding';
 import openInApp from './openInApp';
+import pageShare from './pageShare';
 import plugin from './plugin';
 import portal from './portal';
 import providers from './providers';
@@ -74,11 +76,13 @@ const resources = {
   metadata,
   migration,
   modelProvider,
+  modelRuntime,
   models,
   notification,
   oauth,
   onboarding,
   openInApp,
+  pageShare,
   plugin,
   portal,
   providers,

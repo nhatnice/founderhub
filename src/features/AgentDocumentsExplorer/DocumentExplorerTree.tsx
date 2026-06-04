@@ -4,7 +4,6 @@ import { Trash2Icon } from 'lucide-react';
 import type { CSSProperties } from 'react';
 import { memo, useCallback, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useMatch, useNavigate } from 'react-router-dom';
 import type { KeyedMutator } from 'swr';
 
 import type {
@@ -12,22 +11,33 @@ import type {
   ExplorerTreeHandle,
   ExplorerTreeNode,
 } from '@/features/ExplorerTree';
-import { ExplorerTree, FOLDER_ICON_CSS } from '@/features/ExplorerTree';
+import { ExplorerTree, FOLDER_ICON_CSS, getExplorerTreeStyleVars } from '@/features/ExplorerTree';
 import { useChatStore } from '@/store/chat';
 
 import DocumentExplorerToolbar from './DocumentExplorerToolbar';
 import { useDocumentTreeOps } from './hooks/useDocumentTreeOps';
 import type { AgentDocumentItem } from './types';
-import {
-  isFolderItem,
-  isManagedSkillItem,
-  isOrphanSkillBundleItem,
-  isSkillIndexItem,
-} from './types';
+import { isOrphanSkillBundleItem } from './types';
 import { canDropDocument } from './utils/canDrop';
 
-const PAGE_ROUTE_PATTERN = '/agent/:aid/:topicId/page/:docId?';
 const SKILL_INDEX_FILENAME = 'SKILL.md';
+const FILE_TREE_HOST_TAG = 'file-tree-container';
+const RENAME_INPUT_SELECTOR = 'input[data-item-rename-input]';
+
+// pierre/trees auto-selects the full value when the rename input mounts. For
+// files with extensions (e.g. `Untitled document.md`), narrow the selection to
+// the stem so the user can type a new name without overwriting the suffix.
+const selectStemOfActiveRenameInput = (root: HTMLElement | null) => {
+  if (!root) return;
+  const host = root.querySelector(FILE_TREE_HOST_TAG);
+  const input = host?.shadowRoot?.querySelector<HTMLInputElement>(RENAME_INPUT_SELECTOR);
+  if (!input) return;
+  const value = input.value;
+  const dotIndex = value.lastIndexOf('.');
+  // Skip dotfiles and extension-less names — leave pierre's full-selection.
+  if (dotIndex <= 0) return;
+  input.setSelectionRange(0, dotIndex);
+};
 
 const styles = createStaticStyles(({ css, cssVar }) => ({
   tree: css`
@@ -58,23 +68,20 @@ interface Props {
 
 const DocumentExplorerTree = memo<Props>(({ agentId, data, mutate, style }) => {
   const { t } = useTranslation(['chat', 'common']);
-  const navigate = useNavigate();
-  const pageMatch = useMatch(PAGE_ROUTE_PATTERN);
   const openDocument = useChatStore((s) => s.openDocument);
   const treeRef = useRef<ExplorerTreeHandle | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
 
   const startInlineRename = useCallback((id: string) => {
     treeRef.current?.startRenaming(id);
+    // Match the new-file flow: leave the extension out of the selection so
+    // the user can retype only the stem.
+    requestAnimationFrame(() => selectStemOfActiveRenameInput(containerRef.current));
   }, []);
 
-  const ops = useDocumentTreeOps({
-    agentId,
-    data,
-    mutate,
-    topicId: pageMatch?.params.topicId,
-  });
+  const ops = useDocumentTreeOps({ agentId, data, mutate });
 
-  const documents = useMemo(() => data.filter((doc) => doc.sourceType !== 'web'), [data]);
+  const documents = useMemo(() => data.filter((doc) => doc.category !== 'web'), [data]);
 
   // AgentDocument.parentId references the parent's documentId (FK to documents.id),
   // but ExplorerTree's flat layout expects parentId to point at another node's
@@ -98,14 +105,18 @@ const DocumentExplorerTree = memo<Props>(({ agentId, data, mutate, style }) => {
       documents.map((doc) => ({
         data: doc,
         id: doc.id,
-        isFolder: isFolderItem(doc),
-        name: isSkillIndexItem(doc) ? SKILL_INDEX_FILENAME : doc.title || doc.filename || '',
+        isFolder: doc.isFolder,
+        name: doc.isSkillIndex ? SKILL_INDEX_FILENAME : doc.title || doc.filename || '',
         parentId: resolveParentRowId(doc.parentId),
       })),
     [documents, resolveParentRowId],
   );
   const defaultExpandedIds = useMemo(
     () => nodes.filter((node) => node.isFolder && node.parentId == null).map((node) => node.id),
+    [nodes],
+  );
+  const treeStyleVars = useMemo(
+    () => getExplorerTreeStyleVars({ reserveChevronSlot: nodes.some((node) => node.isFolder) }),
     [nodes],
   );
 
@@ -123,7 +134,12 @@ const DocumentExplorerTree = memo<Props>(({ agentId, data, mutate, style }) => {
   const focusNewRowForRename = useCallback((pendingId: string) => {
     // Defer past the current task so React commits the inserted row and the
     // tree adapter rebuilds its id→path map before we trigger rename.
-    setTimeout(() => treeRef.current?.startRenaming(pendingId), 0);
+    setTimeout(() => {
+      treeRef.current?.startRenaming(pendingId);
+      // After pierre's input.select() runs in its own layout effect, narrow
+      // selection to the stem so the `.md` extension stays intact.
+      requestAnimationFrame(() => selectStemOfActiveRenameInput(containerRef.current));
+    }, 0);
   }, []);
 
   const handleCreateFolder = useCallback(
@@ -141,15 +157,9 @@ const DocumentExplorerTree = memo<Props>(({ agentId, data, mutate, style }) => {
     (node: ExplorerTreeNode<AgentDocumentItem>) => {
       const doc = node.data;
       if (!doc || node.isFolder) return;
-      if (pageMatch?.params.aid && pageMatch.params.topicId) {
-        navigate(
-          `/agent/${pageMatch.params.aid}/${pageMatch.params.topicId}/page/${doc.documentId}`,
-        );
-        return;
-      }
-      openDocument(doc.documentId);
+      openDocument(doc.documentId, doc.id);
     },
-    [navigate, openDocument, pageMatch?.params.aid, pageMatch?.params.topicId],
+    [openDocument],
   );
 
   const handleCommitRename = useCallback(
@@ -175,14 +185,12 @@ const DocumentExplorerTree = memo<Props>(({ agentId, data, mutate, style }) => {
   );
 
   const canDrag = useCallback(
-    (node: ExplorerTreeNode<AgentDocumentItem>) =>
-      !!node.data && node.data.sourceType !== 'web' && !isManagedSkillItem(node.data),
+    (node: ExplorerTreeNode<AgentDocumentItem>) => !!node.data && node.data.category === 'document',
     [],
   );
 
   const canRename = useCallback(
-    (node: ExplorerTreeNode<AgentDocumentItem>) =>
-      !!node.data && node.data.sourceType !== 'web' && !isManagedSkillItem(node.data),
+    (node: ExplorerTreeNode<AgentDocumentItem>) => !!node.data && node.data.category === 'document',
     [],
   );
 
@@ -193,16 +201,25 @@ const DocumentExplorerTree = memo<Props>(({ agentId, data, mutate, style }) => {
 
   const getContextMenuItems = useCallback(
     (node: ExplorerTreeNode<AgentDocumentItem>): MenuProps['items'] => {
-      if (node.data && isManagedSkillItem(node.data) && !isRecoverableSkillBundle(node.data)) {
+      const isSkill = node.data?.category === 'skill';
+      if (isSkill && !isRecoverableSkillBundle(node.data!)) {
         return [];
       }
 
       const isFolder = !!node.isFolder;
       const targetParentId = isFolder ? node.id : (node.parentId ?? null);
 
+      // Right-click on a row that's part of the current multi-selection acts
+      // on the whole selection; otherwise it targets only the right-clicked
+      // row (which matches typical file-tree UX where right-clicking outside
+      // the selection narrows the action).
+      const selectedIds = treeRef.current?.getSelectedIds() ?? [];
+      const isMulti = selectedIds.length > 1 && selectedIds.includes(node.id);
+      const deleteIds = isMulti ? selectedIds : [node.id];
+
       const items: NonNullable<MenuProps['items']> = [];
 
-      if (isFolder && (!node.data || !isManagedSkillItem(node.data))) {
+      if (isFolder && !isSkill && !isMulti) {
         items.push(
           {
             key: 'new-folder',
@@ -218,7 +235,7 @@ const DocumentExplorerTree = memo<Props>(({ agentId, data, mutate, style }) => {
         );
       }
 
-      if (!node.data || !isManagedSkillItem(node.data)) {
+      if (!isSkill && !isMulti) {
         items.push({
           key: 'rename',
           label: t('workingPanel.resources.tree.rename'),
@@ -230,8 +247,10 @@ const DocumentExplorerTree = memo<Props>(({ agentId, data, mutate, style }) => {
         danger: true,
         icon: <Trash2Icon size={14} />,
         key: 'delete',
-        label: t('delete', { ns: 'common' }),
-        onClick: () => ops.deleteDocument(node.id),
+        label: isMulti
+          ? t('workingPanel.resources.tree.deleteSelected', { count: deleteIds.length })
+          : t('delete', { ns: 'common' }),
+        onClick: () => ops.deleteDocuments(deleteIds),
       });
 
       return items;
@@ -240,14 +259,13 @@ const DocumentExplorerTree = memo<Props>(({ agentId, data, mutate, style }) => {
   );
 
   return (
-    <div className={styles.tree} style={style}>
+    <div className={styles.tree} ref={containerRef} style={{ ...style, ...treeStyleVars }}>
       <ExplorerTree<AgentDocumentItem>
         iconsColored
         canDrag={canDrag}
         canDrop={canDrop}
         canRename={canRename}
         defaultExpandedIds={defaultExpandedIds}
-        density="compact"
         getContextMenuItems={getContextMenuItems}
         iconSet="complete"
         nodes={nodes}

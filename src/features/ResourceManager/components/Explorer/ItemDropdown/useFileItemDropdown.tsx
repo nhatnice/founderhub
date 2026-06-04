@@ -1,4 +1,5 @@
 import { copyToClipboard, createRawModal, Icon } from '@lobehub/ui';
+import { confirmModal } from '@lobehub/ui/base-ui';
 import { App } from 'antd';
 import { type ItemType } from 'antd/es/menu/interface';
 import {
@@ -54,7 +55,7 @@ export const useFileItemDropdown = ({
   onRenameStart,
 }: UseFileItemDropdownParams): UseFileItemDropdownReturn => {
   const { t } = useTranslation(['components', 'common', 'knowledgeBase']);
-  const { message, modal } = App.useApp();
+  const { message } = App.useApp();
   const appOrigin = useAppOrigin();
 
   const { deleteResource, moveResource, refreshFileList } = useFileStore(
@@ -168,18 +169,21 @@ export const useFileItemDropdown = ({
               onClick: async ({ domEvent }) => {
                 domEvent.stopPropagation();
 
-                modal.confirm({
+                confirmModal({
+                  cancelText: t('cancel', { ns: 'common' }),
+                  content: t('FileManager.actions.confirmRemoveFromLibrary', {
+                    count: 1,
+                  }),
                   okButtonProps: {
                     danger: true,
                   },
+                  okText: t('FileManager.actions.removeFromLibrary'),
                   onOk: async () => {
                     await removeFilesFromKnowledgeBase(libraryId, [id]);
 
                     message.success(t('FileManager.actions.removeFromLibrarySuccess'));
                   },
-                  title: t('FileManager.actions.confirmRemoveFromLibrary', {
-                    count: 1,
-                  }),
+                  title: t('FileManager.actions.removeFromLibrary'),
                 });
               },
             },
@@ -301,11 +305,12 @@ export const useFileItemDropdown = ({
           label: t('delete', { ns: 'common' }),
           onClick: async ({ domEvent }) => {
             domEvent.stopPropagation();
-            modal.confirm({
+            confirmModal({
               content: isFolder
                 ? t('FileManager.actions.confirmDeleteFolder')
                 : t('FileManager.actions.confirmDelete'),
               okButtonProps: { danger: true },
+              title: t('delete', { ns: 'common' }),
               onOk: async () => {
                 // Use optimistic delete - instant UI update, sync in background
                 await deleteResource(id);
@@ -335,7 +340,6 @@ export const useFileItemDropdown = ({
     libraries,
     libraryId,
     message,
-    modal,
     moveResource,
     onRenameStart,
     refreshFileList,

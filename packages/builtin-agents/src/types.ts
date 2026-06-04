@@ -10,7 +10,10 @@ export const BUILTIN_AGENT_SLUGS = {
   groupAgentBuilder: 'group-agent-builder',
   groupSupervisor: 'group-supervisor',
   inbox: 'inbox',
+  nightlyReview: 'nightly-review',
   pageAgent: 'page-agent',
+  selfFeedbackIntent: 'self-feedback-intent',
+  selfReflection: 'self-reflection',
   taskAgent: 'task-agent',
   webOnboarding: 'web-onboarding',
 } as const;

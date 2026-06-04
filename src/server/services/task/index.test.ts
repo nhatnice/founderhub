@@ -39,6 +39,12 @@ vi.mock('@/server/services/aiAgent', () => ({
   })),
 }));
 
+// Attachment resolver hits FileModel + DocumentService + FileService — stub it
+// out so getTaskDetail tests don't need a real file pipeline.
+vi.mock('@/server/services/file/resolveAttachments', () => ({
+  resolveAttachmentMetadata: vi.fn().mockResolvedValue([]),
+}));
+
 describe('TaskService', () => {
   const db = {} as LobeChatDatabase;
   const userId = 'user-1';
@@ -53,9 +59,11 @@ describe('TaskService', () => {
     findAllDescendants: vi.fn(),
     getCheckpointConfig: vi.fn(),
     getComments: vi.fn(),
+    getCommentFileIdsMap: vi.fn().mockResolvedValue({}),
     getDependencies: vi.fn(),
     getDependenciesByTaskIds: vi.fn(),
     getReviewConfig: vi.fn(),
+    getTaskFileIds: vi.fn().mockResolvedValue([]),
     getTreeAgentIdsForTaskIds: vi.fn().mockResolvedValue({}),
     getTreePinnedDocuments: vi.fn(),
     resolve: vi.fn(),
@@ -164,7 +172,12 @@ describe('TaskService', () => {
         totalTopics: 0,
       };
 
-      const parentTask = { id: 'task_001', identifier: 'TASK-1', name: 'Parent Task' };
+      const parentTask = {
+        assigneeAgentId: 'agt_parent',
+        id: 'task_001',
+        identifier: 'TASK-1',
+        name: 'Parent Task',
+      };
 
       mockTaskModel.resolve.mockResolvedValue(task);
       mockTaskModel.findAllDescendants.mockResolvedValue([]);
@@ -181,7 +194,11 @@ describe('TaskService', () => {
       const service = new TaskService(db, userId);
       const result = await service.getTaskDetail('TASK-2');
 
-      expect(result?.parent).toEqual({ identifier: 'TASK-1', name: 'Parent Task' });
+      expect(result?.parent).toEqual({
+        agentId: 'agt_parent',
+        identifier: 'TASK-1',
+        name: 'Parent Task',
+      });
       expect(mockTaskModel.findById).toHaveBeenCalledWith('task_001');
     });
 

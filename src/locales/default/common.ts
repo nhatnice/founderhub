@@ -3,9 +3,9 @@ export default {
   'advanceSettings': 'Advanced Settings',
   'alert.cloud.action': 'Try now',
   'alert.cloud.desc':
-    'All registered users get {{credit}} free computing credits per month—no setup needed. Includes global cloud sync and advanced web search.',
+    'All registered users get {{credit}} free credits per month—no setup needed. Includes global cloud sync and advanced web search.',
   'alert.cloud.descOnMobile':
-    'All registered users get {{credit}} free computing credits per month—no setup needed.',
+    'All registered users get {{credit}} free credits per month—no setup needed.',
   'alert.cloud.title': '{{name}} beta is live',
   'agentOnboardingPromo.actionLabel': 'Try it now',
   'agentOnboardingPromo.description':
@@ -317,7 +317,7 @@ export default {
   'exportType.allAgentWithMessage': 'Export All Agents and Messages',
   'exportType.globalSetting': 'Export Global Settings',
   'feedback': 'Feedback',
-  'feedback.emailContact': 'You can also email us at {{email}}',
+  'feedback.emailContact': 'You can also email us at <email>{{email}}</email>',
   'feedback.errors.fileTooLarge': 'File exceeds 5MB',
   'feedback.errors.submitFailed': 'Submit failed. Try again.',
   'feedback.errors.teamNotFound': 'Configuration error',
@@ -436,6 +436,7 @@ export default {
   'mail.support': 'Email Support',
   'more': 'More',
   'navPanel.agent': 'Agents',
+  'navPanel.bottomDivider': 'Items below anchor to bottom',
   'navPanel.customizeSidebar': 'Customize Sidebar',
   'navPanel.displayItems': 'Display Items',
   'navPanel.resetDefault': 'Reset to Default',
@@ -562,4 +563,5 @@ export default {
   'userPanel.upgradePlan': 'Upgrade Plan',
   'userPanel.usages': 'Usage',
   'version': 'Version',
+  'zoom': 'Zoom',
 };

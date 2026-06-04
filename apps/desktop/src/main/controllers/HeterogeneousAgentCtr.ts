@@ -28,6 +28,7 @@ import {
 } from '@lobechat/heterogeneous-agents/spawn';
 import { app as electronApp, BrowserWindow } from 'electron';
 
+import { HETERO_AGENT_FILES_DIR, HETERO_AGENT_TRACING_DIR } from '@/const/heteroAgent';
 import { getHeterogeneousAgentDriver } from '@/modules/heterogeneousAgent';
 import type {
   HeterogeneousAgentBuildPlan,
@@ -62,7 +63,7 @@ const CODEX_RESUME_CWD_MISMATCH_PATTERNS = [
 ] as const;
 
 /** Directory under appStoragePath for caching downloaded files */
-const FILE_CACHE_DIR = 'heteroAgent/files';
+const FILE_CACHE_DIR = HETERO_AGENT_FILES_DIR;
 const CLI_TRACE_DIR = '.heerogeneous-tracing';
 const CODEX_STDERR_STATUS_LINE = 'Reading prompt from stdin...';
 const CODEX_WARN_LOG_PATTERN = /^\d{4}-\d{2}-\d{2}T\S+\s+WARN\s+/;
@@ -434,7 +435,32 @@ export default class HeterogeneousAgentCtr extends ControllerModule {
   }
 
   private get shouldTraceCliOutput(): boolean {
-    return process.env.NODE_ENV !== 'test' && !electronApp.isPackaged;
+    if (process.env.NODE_ENV === 'test') return false;
+    // Dev builds always trace. Packaged builds trace only when the user has
+    // flipped the Help-menu developer toggle — so production issues can be
+    // captured on demand without polluting normal runs.
+    if (!electronApp.isPackaged) return true;
+    return this.app.storeManager.get('heteroTracingEnabled', false);
+  }
+
+  /**
+   * Root directory for CLI trace sessions.
+   *
+   * When the user has explicitly opted in via the `heteroTracingEnabled`
+   * Help-menu toggle, centralize traces under the app storage dir
+   * (`<appStoragePath>/heteroAgent/tracing`) — this is the only path packaged
+   * builds ever trace through, and it keeps traces out of the user's real
+   * project directory while staying reachable from one stable Help-menu entry.
+   *
+   * Otherwise (a plain dev run with the toggle off) keep writing into the
+   * working directory (`cwd/.heerogeneous-tracing`) — devs expect traces to
+   * show up alongside the repo they're running in.
+   */
+  private resolveTraceRootDir(cwd: string): string {
+    if (this.app.storeManager.get('heteroTracingEnabled', false)) {
+      return path.join(this.app.appStoragePath, HETERO_AGENT_TRACING_DIR);
+    }
+    return path.join(cwd, CLI_TRACE_DIR);
   }
 
   private formatTraceTimestamp(date: Date): string {
@@ -501,7 +527,7 @@ export default class HeterogeneousAgentCtr extends ControllerModule {
     }
 
     const createdAt = new Date();
-    const rootDir = path.join(cwd, CLI_TRACE_DIR);
+    const rootDir = this.resolveTraceRootDir(cwd);
     const agentDir = path.join(rootDir, this.sanitizeTracePathSegment(session.agentType));
     const traceId = `${this.formatTraceTimestamp(createdAt)}-${this.sanitizeTracePathSegment(
       session.sessionId,
@@ -605,7 +631,7 @@ export default class HeterogeneousAgentCtr extends ControllerModule {
     }
   }
 
-  // ─── AskUserQuestion MCP server (LOBE-8725) ───
+  // ─── AskUserQuestion MCP server () ───
 
   /**
    * Lazy single-instance MCP server for CC's AskUserQuestion replacement.
@@ -651,7 +677,7 @@ export default class HeterogeneousAgentCtr extends ControllerModule {
 
     // `alwaysLoad: true` is the undocumented CC flag that promotes our
     // server's tool out of the deferred set so the model calls it directly
-    // (no ToolSearch hop). See LOBE-8725 spike notes — falls back to the
+    // (no ToolSearch hop). See spike notes — falls back to the
     // 2-hop ToolSearch path if a future CC drops the flag, no breakage.
     const config = {
       mcpServers: {
@@ -1250,5 +1276,90 @@ export default class HeterogeneousAgentCtr extends ControllerModule {
     };
     process.on('SIGTERM', onSignal);
     process.on('SIGINT', onSignal);
+  }
+
+  /**
+   * Spawn `lh hetero exec` for gateway-driven agent runs.
+   * The `lh` CLI handles everything downstream — no local
+   * AgentStreamPipeline or IPC broadcast needed. Mirrors
+   * `spawnHeteroSandbox()` on the server side.
+   */
+  spawnLhHeteroExec(params: {
+    agentType: string;
+    cwd?: string;
+    jwt: string;
+    operationId: string;
+    prompt: string;
+    resumeSessionId?: string;
+    serverUrl: string;
+    systemContext?: string;
+    topicId: string;
+  }): void {
+    const {
+      agentType,
+      cwd,
+      jwt,
+      operationId,
+      prompt,
+      resumeSessionId,
+      serverUrl,
+      systemContext,
+      topicId,
+    } = params;
+    const workDir = cwd ?? process.cwd();
+
+    const args = [
+      'hetero',
+      'exec',
+      '--type',
+      agentType,
+      '--operation-id',
+      operationId,
+      '--topic',
+      topicId,
+      '--render',
+      'none',
+      '--input-json',
+      '-',
+      '--cwd',
+      workDir,
+      ...(resumeSessionId ? ['--resume', resumeSessionId] : []),
+    ];
+
+    const env = {
+      ...process.env,
+      ...buildProxyEnv(this.app.storeManager.get('networkProxy')),
+      LOBEHUB_JWT: jwt,
+      LOBEHUB_SERVER: serverUrl,
+    };
+
+    logger.info('spawnLhHeteroExec: type=%s op=%s topic=%s', agentType, operationId, topicId);
+
+    const child = spawn('lh', args, {
+      cwd: workDir,
+      env,
+      stdio: ['pipe', 'inherit', 'inherit'],
+    });
+
+    // When systemContext is provided, send a content-block array so CC sees the
+    // context block first, then the user's actual message — mirrors
+    // spawnHeteroSandbox. lh handles JSON arrays via coerceJsonPrompt, so no lh
+    // changes are required.
+    const stdinPayload = systemContext
+      ? JSON.stringify([
+          { text: systemContext, type: 'text' },
+          { text: prompt, type: 'text' },
+        ])
+      : JSON.stringify(prompt);
+    child.stdin.write(stdinPayload);
+    child.stdin.end();
+
+    child.on('error', (err) => {
+      logger.error('spawnLhHeteroExec: spawn failed — %s', err.message);
+    });
+
+    child.on('exit', (code, signal) => {
+      logger.info('spawnLhHeteroExec: exited — op=%s code=%s signal=%s', operationId, code, signal);
+    });
   }
 }

@@ -117,6 +117,11 @@ const portalDocumentId = (s: ChatStoreState): string | undefined => {
   return view?.documentId;
 };
 
+const portalAgentDocumentId = (s: ChatStoreState): string | undefined => {
+  const view = getViewData(s, PortalViewType.Document);
+  return view?.agentDocumentId;
+};
+
 // File Preview selectors
 const currentFile = (s: ChatStoreState): PortalFile | undefined => {
   const view = getViewData(s, PortalViewType.FilePreview);
@@ -142,6 +147,19 @@ const currentLocalFile = (
 
 const localFilePath = (s: ChatStoreState) => currentLocalFile(s)?.filePath;
 const localFileWorkingDirectory = (s: ChatStoreState) => currentLocalFile(s)?.workingDirectory;
+
+const localFileBuffer =
+  (filePath: string | undefined) =>
+  (s: ChatStoreState): string | undefined =>
+    filePath ? s.dirtyLocalFileContents[filePath] : undefined;
+
+const isLocalFileDirty =
+  (filePath: string | undefined) =>
+  (s: ChatStoreState): boolean =>
+    !!filePath && filePath in s.dirtyLocalFileContents;
+
+const dirtyLocalFileContents = (s: ChatStoreState): Record<string, string> =>
+  s.dirtyLocalFileContents;
 
 // Message Detail selectors
 const messageDetailId = (s: ChatStoreState): string | undefined => {
@@ -194,6 +212,7 @@ export const chatPortalSelectors = {
   isArtifactTagClosed,
 
   // Document data
+  portalAgentDocumentId,
   portalDocumentId,
 
   // File preview data
@@ -204,6 +223,9 @@ export const chatPortalSelectors = {
   // Local file data
   activeLocalFilePath,
   currentLocalFile,
+  dirtyLocalFileContents,
+  isLocalFileDirty,
+  localFileBuffer,
   localFilePath,
   localFileWorkingDirectory,
   openLocalFiles,

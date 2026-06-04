@@ -16,13 +16,17 @@ import { useTranslation } from 'react-i18next';
 
 import { useAgentId } from '@/features/ChatInput/hooks/useAgentId';
 import CloudRepoSwitcher from '@/features/ChatInput/RuntimeConfig/CloudRepoSwitcher';
+import DeviceWorkingDirectory from '@/features/ChatInput/RuntimeConfig/DeviceWorkingDirectory';
 import GitStatus from '@/features/ChatInput/RuntimeConfig/GitStatus';
+import HeteroDeviceSwitcher from '@/features/ChatInput/RuntimeConfig/HeteroDeviceSwitcher';
 import { useRepoType } from '@/features/ChatInput/RuntimeConfig/useRepoType';
 import WorkingDirectoryContent from '@/features/ChatInput/RuntimeConfig/WorkingDirectory';
 import { useAgentStore } from '@/store/agent';
 import { agentByIdSelectors } from '@/store/agent/selectors';
 import { useChatStore } from '@/store/chat';
 import { topicSelectors } from '@/store/chat/selectors';
+import { useUserStore } from '@/store/user';
+import { labPreferSelectors } from '@/store/user/selectors';
 
 const styles = createStaticStyles(({ css }) => ({
   bar: css`
@@ -78,6 +82,15 @@ const WorkingDirectoryBar = memo(() => {
   );
   const topicWorkingDirectory = useChatStore(topicSelectors.currentTopicWorkingDirectory);
   const effectiveWorkingDirectory = topicWorkingDirectory || agentWorkingDirectory;
+  const enableExecutionDeviceSwitcher = useUserStore(
+    labPreferSelectors.enableExecutionDeviceSwitcher,
+  );
+  const agencyConfig = useAgentStore((s) =>
+    agentId ? agentByIdSelectors.getAgencyConfigById(agentId)(s) : undefined,
+  );
+  // Runs dispatched to a remote device can't browse the local filesystem — use
+  // the device-scoped picker (recent dirs + manual input) instead.
+  const isDeviceMode = agencyConfig?.executionTarget === 'device' && !!agencyConfig?.boundDeviceId;
 
   const repoType = useRepoType(effectiveWorkingDirectory);
 
@@ -93,7 +106,14 @@ const WorkingDirectoryBar = memo(() => {
     if (!agentId) return null;
     return (
       <Flexbox horizontal align={'center'} className={styles.bar} justify={'space-between'}>
-        <CloudRepoSwitcher agentId={agentId} />
+        <Flexbox horizontal align={'center'} gap={4}>
+          {enableExecutionDeviceSwitcher && <HeteroDeviceSwitcher agentId={agentId} />}
+          {isDeviceMode ? (
+            <DeviceWorkingDirectory agentId={agentId} />
+          ) : (
+            <CloudRepoSwitcher agentId={agentId} />
+          )}
+        </Flexbox>
       </Flexbox>
     );
   }
@@ -129,28 +149,38 @@ const WorkingDirectoryBar = memo(() => {
   return (
     <Flexbox horizontal align={'center'} className={styles.bar} justify={'space-between'}>
       <Flexbox horizontal align={'center'} gap={4}>
-        <Popover
-          content={<WorkingDirectoryContent agentId={agentId} onClose={() => setOpen(false)} />}
-          open={open}
-          placement="bottomLeft"
-          styles={{ content: { padding: 4 } }}
-          trigger="click"
-          onOpenChange={setOpen}
-        >
-          <div>
-            {open ? (
-              dirButton
-            ) : (
-              <Tooltip
-                title={effectiveWorkingDirectory || t('localSystem.workingDirectory.notSet')}
-              >
-                {dirButton}
-              </Tooltip>
+        {enableExecutionDeviceSwitcher && <HeteroDeviceSwitcher agentId={agentId} />}
+        {isDeviceMode ? (
+          // A remote device's filesystem isn't browsable from here — use the
+          // device-scoped picker (recent dirs + manual input) instead of the
+          // local folder picker + git status.
+          <DeviceWorkingDirectory agentId={agentId} />
+        ) : (
+          <>
+            <Popover
+              content={<WorkingDirectoryContent agentId={agentId} onClose={() => setOpen(false)} />}
+              open={open}
+              placement="bottomLeft"
+              styles={{ content: { padding: 4 } }}
+              trigger="click"
+              onOpenChange={setOpen}
+            >
+              <div>
+                {open ? (
+                  dirButton
+                ) : (
+                  <Tooltip
+                    title={effectiveWorkingDirectory || t('localSystem.workingDirectory.notSet')}
+                  >
+                    {dirButton}
+                  </Tooltip>
+                )}
+              </div>
+            </Popover>
+            {effectiveWorkingDirectory && repoType && (
+              <GitStatus isGithub={repoType === 'github'} path={effectiveWorkingDirectory} />
             )}
-          </div>
-        </Popover>
-        {effectiveWorkingDirectory && repoType && (
-          <GitStatus isGithub={repoType === 'github'} path={effectiveWorkingDirectory} />
+          </>
         )}
       </Flexbox>
       <Tooltip title={tChat('heteroAgent.fullAccess.tooltip')}>{fullAccessBadge}</Tooltip>

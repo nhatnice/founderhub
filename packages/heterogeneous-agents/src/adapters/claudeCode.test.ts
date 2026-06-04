@@ -54,6 +54,128 @@ describe('ClaudeCodeAdapter', () => {
       );
     });
 
+    it('classifies overloaded failures from api_error_status 529 result events', () => {
+      const adapter = new ClaudeCodeAdapter();
+      const rawError =
+        'API Error: 529 {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}';
+
+      adapter.adapt({ subtype: 'init', type: 'system' });
+      const events = adapter.adapt({
+        api_error_status: 529,
+        is_error: true,
+        result: rawError,
+        type: 'result',
+      });
+
+      expect(events.map((e) => e.type)).toEqual(['stream_end', 'error']);
+      expect(events[1].data).toMatchObject({
+        agentType: 'claude-code',
+        clearEchoedContent: true,
+        code: 'overloaded',
+        message: rawError,
+        stderr: rawError,
+      });
+    });
+
+    it('classifies overloaded failures from result text alone', () => {
+      const adapter = new ClaudeCodeAdapter();
+      const rawError = 'Overloaded';
+
+      adapter.adapt({ subtype: 'init', type: 'system' });
+      const events = adapter.adapt({
+        is_error: true,
+        result: rawError,
+        type: 'result',
+      });
+
+      expect(events.map((e) => e.type)).toEqual(['stream_end', 'error']);
+      expect(events[1].data).toMatchObject({
+        agentType: 'claude-code',
+        code: 'overloaded',
+        message: rawError,
+      });
+    });
+
+    it('classifies a 429 "not your usage limit" server throttle as overloaded, not rate_limit', () => {
+      const adapter = new ClaudeCodeAdapter();
+      const rawError =
+        'API Error: Server is temporarily limiting requests (not your usage limit) · Rate limited';
+
+      adapter.adapt({ subtype: 'init', type: 'system' });
+      // CC still emits a generic rate_limit_event (rejected, no resetsAt) for
+      // this transient throttle — it must NOT tip the classifier toward the
+      // user-facing usage-limit guide.
+      adapter.adapt({
+        rate_limit_info: { isUsingOverage: false, status: 'rejected' },
+        type: 'rate_limit_event',
+      });
+
+      const events = adapter.adapt({
+        api_error_status: 429,
+        is_error: true,
+        result: rawError,
+        type: 'result',
+      });
+
+      expect(events.map((e) => e.type)).toEqual(['stream_end', 'error']);
+      expect(events[1].data).toMatchObject({
+        agentType: 'claude-code',
+        clearEchoedContent: true,
+        code: 'overloaded',
+        message: rawError,
+        stderr: rawError,
+      });
+    });
+
+    it('treats a 429 with no reset window in rate_limit_event as overloaded, not rate_limit', () => {
+      const adapter = new ClaudeCodeAdapter();
+      // Generic "Rate limited" wording + a rate_limit_event that carries no
+      // resetsAt / rateLimitType. The structured signal — not the 429 status
+      // or the "rate limit" substring — decides: no reset window → transient
+      // server throttle → overloaded.
+      const rawError = 'API Error: 429 · Rate limited';
+
+      adapter.adapt({ subtype: 'init', type: 'system' });
+      adapter.adapt({
+        rate_limit_info: { status: 'rejected' },
+        type: 'rate_limit_event',
+      });
+
+      const events = adapter.adapt({
+        api_error_status: 429,
+        is_error: true,
+        result: rawError,
+        type: 'result',
+      });
+
+      expect(events.map((e) => e.type)).toEqual(['stream_end', 'error']);
+      expect(events[1].data).toMatchObject({ code: 'overloaded', message: rawError });
+    });
+
+    it('classifies a user quota limit from rateLimitType alone (no resetsAt)', () => {
+      const adapter = new ClaudeCodeAdapter();
+      const rawError = 'API Error: 429 · Rate limited';
+
+      adapter.adapt({ subtype: 'init', type: 'system' });
+      // rateLimitType is itself a user-quota signal even without resetsAt.
+      adapter.adapt({
+        rate_limit_info: { rateLimitType: 'seven_day', status: 'rejected' },
+        type: 'rate_limit_event',
+      });
+
+      const events = adapter.adapt({
+        api_error_status: 429,
+        is_error: true,
+        result: rawError,
+        type: 'result',
+      });
+
+      expect(events[1].data).toMatchObject({
+        code: 'rate_limit',
+        rateLimitInfo: { rateLimitType: 'seven_day' },
+      });
+    });
+
     it('classifies rate-limit failures from paired rate_limit_event + result events', () => {
       const adapter = new ClaudeCodeAdapter();
       const rawError = "You've hit your limit · resets 9am (Asia/Shanghai)";
@@ -295,7 +417,7 @@ describe('ClaudeCodeAdapter', () => {
     });
   });
 
-  describe('ToolSearch tool_reference content (LOBE-7369)', () => {
+  describe('ToolSearch tool_reference content ()', () => {
     // CC CLI serializes ToolSearch results as `tool_reference` blocks — no
     // `text` or `content` field — which the generic array mapper dropped to
     // empty content, leaving the tool message in DB with `content: ''` and
@@ -416,7 +538,7 @@ describe('ClaudeCodeAdapter', () => {
     });
   });
 
-  describe('Read tool image content (LOBE-7338)', () => {
+  describe('Read tool image content ()', () => {
     // CC's `Read` on images returns a `tool_result` whose `content` is an
     // `image` block (base64). The generic mapper had no branch for it so
     // resultContent collapsed to '' and the UI's StatusIndicator stuck on the
@@ -1169,11 +1291,11 @@ describe('ClaudeCodeAdapter', () => {
   });
 
   describe('usage and model extraction', () => {
-    // Under `--include-partial-messages` (our preset default), CC emits a
-    // stale `message_start.usage` snapshot (e.g. `output_tokens: 8`) that it
-    // echoes verbatim on every content-block `assistant` event. The
-    // authoritative per-turn total only arrives later as `message_delta`.
-    // So turn_metadata emission is wired to `message_delta`, not `assistant`.
+    // Under `--include-partial-messages`, CC emits a stale
+    // `message_start.usage` snapshot (e.g. `output_tokens: 8`) that it echoes
+    // verbatim on every content-block `assistant` event. The authoritative
+    // per-turn total only arrives later as `message_delta`. So turn_metadata
+    // emission is wired to `message_delta`, not `assistant`.
     it('does NOT emit turn_metadata on assistant events (usage there is stale)', () => {
       const adapter = new ClaudeCodeAdapter();
       adapter.adapt({ subtype: 'init', type: 'system' });
@@ -2200,9 +2322,9 @@ describe('ClaudeCodeAdapter', () => {
   });
 
   // ────────────────────────────────────────────────────
-  // LOBE-8998: external signal detection (Monitor task callbacks)
+  // external signal detection (Monitor task callbacks)
   // ────────────────────────────────────────────────────
-  describe('external signal detection (LOBE-8998)', () => {
+  describe('external signal detection ()', () => {
     const init = (adapter: ClaudeCodeAdapter) => {
       adapter.adapt({
         model: 'claude-sonnet-4-6',

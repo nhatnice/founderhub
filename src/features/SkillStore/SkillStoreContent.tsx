@@ -27,7 +27,7 @@ export const SkillStoreContent = () => {
 
   const options: SegmentedOptions = [
     { label: t('skillStore.tabs.lobehub'), value: SkillStoreTab.LobeHub },
-    { label: 'Skills', value: SkillStoreTab.Skills },
+    { label: t('skillStore.tabs.skills'), value: SkillStoreTab.Skills },
     { label: t('skillStore.tabs.mcp'), value: SkillStoreTab.MCP },
     { label: t('skillStore.tabs.custom'), value: SkillStoreTab.Custom },
   ];
@@ -39,7 +39,7 @@ export const SkillStoreContent = () => {
 
   return (
     <Flexbox gap={8} style={{ maxHeight: '75vh' }} width={'100%'}>
-      <Flexbox gap={8} paddingInline={16}>
+      <Flexbox gap={8}>
         <Flexbox horizontal align={'center'} gap={8}>
           <Segmented
             block
@@ -57,7 +57,7 @@ export const SkillStoreContent = () => {
           onSkillSearch={setSkillKeywords}
         />
       </Flexbox>
-      <Flexbox height={496}>
+      <Flexbox height={496} style={{ marginBlockEnd: -12, marginInline: -16 }}>
         <Flexbox flex={1} style={{ display: isLobeHub ? 'flex' : 'none', overflow: 'auto' }}>
           <LobeHubList keywords={lobehubKeywords} />
         </Flexbox>
