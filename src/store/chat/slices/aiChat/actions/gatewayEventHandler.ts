@@ -19,6 +19,7 @@ import { messageService } from '@/services/message';
 import { emitClientAgentSignalSourceEvent } from '@/store/chat/slices/aiChat/actions/agentSignalBridge';
 import type { ChatStore } from '@/store/chat/store';
 import { notifyDesktopHumanApprovalRequired } from '@/store/chat/utils/desktopNotification';
+import { addUsageToOperationMetrics, type OperationUsageLike } from '@/utils/operationUsageMetrics';
 
 // Lazy-loaded to break the import cycle:
 //   gateway.ts → gatewayEventHandler.ts → executors/index.ts (which pulls in
@@ -54,6 +55,10 @@ interface ToolPayloadIdentity {
   params: unknown;
   toolCallId?: string;
 }
+
+type StepCompleteDataWithUsage = StepCompleteData & {
+  usage?: OperationUsageLike | null;
+};
 
 /**
  * Extract `{ identifier, apiName, params, toolCallId }` from a stream event's
@@ -440,6 +445,13 @@ export const createGatewayEventHandler = (
           uiMessages?: UIChatMessage[];
         };
 
+        // The server's stepIndex is the authoritative step counter — mirror it
+        // onto the operation so step-based UI (OpStatusTray) stays correct
+        // even across page-refresh reconnects.
+        if (typeof event.stepIndex === 'number') {
+          get().updateOperationMetadata(operationId, { stepCount: event.stepIndex + 1 });
+        }
+
         // Server attaches the canonical UIChatMessage[] snapshot at every
         // step boundary (agent-runtime #15152). Use it as Source of Truth
         // instead of issuing a DB refetch — the refetch returns a stale
@@ -493,7 +505,14 @@ export const createGatewayEventHandler = (
       }
 
       case 'step_complete': {
-        const data = event.data as StepCompleteData | undefined;
+        const data = event.data as StepCompleteDataWithUsage | undefined;
+
+        if (data?.phase === 'turn_metadata' && data.usage) {
+          const operation = get().operations[operationId];
+          get().updateOperationMetadata(operationId, {
+            usageMetrics: addUsageToOperationMetrics(operation?.metadata?.usageMetrics, data.usage),
+          });
+        }
 
         // Refresh on execution_complete to ensure final step state is consistent
         if (data?.phase === 'execution_complete') {
@@ -551,10 +570,14 @@ export const createGatewayEventHandler = (
               action: 'gateway/agent_runtime_end',
               context,
             });
-          } else if (data?.reason === 'interrupted' && hasStreamedContent) {
-            // MID-stream cancel. The server's
+          } else if (
+            (data?.reason === 'interrupted' || data?.reason === 'waiting_for_async_tool') &&
+            hasStreamedContent
+          ) {
+            // MID-stream cancel, or a deferred-tool pause
+            // (`waiting_for_async_tool`). The server's
             // `AgentRuntimeCoordinator.resolveUiMessages` omits uiMessages
-            // for status='interrupted' precisely so we can preserve the
+            // for both statuses precisely so we can preserve the
             // in-memory streamed content here. The executor's partial-
             // finalize catch writes the real content to DB asynchronously,
             // but it may not be durable yet — refetching here would race

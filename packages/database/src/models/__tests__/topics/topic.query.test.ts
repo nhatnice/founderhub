@@ -9,6 +9,7 @@ import {
   sessions,
   topics,
   users,
+  workspaces,
 } from '../../../schemas';
 import type { LobeChatDatabase } from '../../../type';
 import { TopicModel } from '../../topic';
@@ -53,6 +54,49 @@ describe('TopicModel - Query', () => {
       expect(result.items[2].id).toBe('4');
     });
 
+    it('should isolate personal and workspace topics for the same user', async () => {
+      await serverDB.insert(workspaces).values({
+        id: 'topic-workspace',
+        name: 'Workspace',
+        primaryOwnerId: userId,
+        slug: 'topic-workspace',
+      });
+      await serverDB.insert(sessions).values({
+        id: 'topic-workspace-session',
+        userId,
+        workspaceId: 'topic-workspace',
+      });
+      await serverDB.insert(topics).values([
+        {
+          id: 'personal-topic',
+          sessionId,
+          updatedAt: new Date('2023-01-01'),
+          userId,
+          workspaceId: null,
+        },
+        {
+          id: 'workspace-topic',
+          sessionId: 'topic-workspace-session',
+          updatedAt: new Date('2023-02-01'),
+          userId,
+          workspaceId: 'topic-workspace',
+        },
+      ]);
+
+      await expect(topicModel.query({ containerId: sessionId })).resolves.toMatchObject({
+        items: [expect.objectContaining({ id: 'personal-topic' })],
+        total: 1,
+      });
+      await expect(
+        new TopicModel(serverDB, userId, 'topic-workspace').query({
+          containerId: 'topic-workspace-session',
+        }),
+      ).resolves.toMatchObject({
+        items: [expect.objectContaining({ id: 'workspace-topic' })],
+        total: 1,
+      });
+    });
+
     it('should order by status priority when sortBy is "status"', async () => {
       await serverDB.insert(topics).values([
         // favorite floats to the top regardless of its (lower-priority) status
@@ -64,7 +108,7 @@ describe('TopicModel - Query', () => {
           updatedAt: new Date('2023-01-01'),
           userId,
         },
-        // null status is treated as `active` (rank 2)
+        // null status is treated as `active` (rank 3)
         { id: 'active', sessionId, updatedAt: new Date('2023-09-01'), userId },
         {
           id: 'running-old',
@@ -87,6 +131,15 @@ describe('TopicModel - Query', () => {
           updatedAt: new Date('2023-03-01'),
           userId,
         },
+        // failed shares the top "pending" bucket with waitingForHuman, so it
+        // ranks just below it and above running/active
+        {
+          id: 'failed',
+          sessionId,
+          status: 'failed',
+          updatedAt: new Date('2023-04-01'),
+          userId,
+        },
         {
           id: 'completed',
           sessionId,
@@ -101,14 +154,15 @@ describe('TopicModel - Query', () => {
       expect(result.items.map((t) => t.id)).toEqual([
         'fav', // favorite, rank-independent
         'waiting', // waitingForHuman = 0
-        'running-new', // running = 1, newer first within the bucket
+        'failed', // failed = 1
+        'running-new', // running = 2, newer first within the bucket
         'running-old',
-        'active', // null status → active = 2
+        'active', // null status → active = 3
         'completed', // completed = 5
       ]);
     });
 
-    it('should keep updatedAt ordering by default (no sortBy)', async () => {
+    it('should order by latest message activity by default (no sortBy)', async () => {
       await serverDB.insert(topics).values([
         {
           id: 'waiting',
@@ -119,11 +173,27 @@ describe('TopicModel - Query', () => {
         },
         { id: 'active', sessionId, updatedAt: new Date('2023-05-01'), userId },
       ]);
+      await serverDB.insert(messages).values([
+        {
+          id: 'waiting-latest-message',
+          role: 'user',
+          topicId: 'waiting',
+          updatedAt: new Date('2023-06-01'),
+          userId,
+        },
+        {
+          id: 'active-older-message',
+          role: 'user',
+          topicId: 'active',
+          updatedAt: new Date('2023-04-01'),
+          userId,
+        },
+      ]);
 
       const result = await topicModel.query({ containerId: sessionId });
 
-      // Without status sort, most-recently-updated wins even if lower priority
-      expect(result.items.map((t) => t.id)).toEqual(['active', 'waiting']);
+      // Without status sort, most-recent message activity wins even if topic.updatedAt is older.
+      expect(result.items.map((t) => t.id)).toEqual(['waiting', 'active']);
     });
 
     it('should query topics with pagination', async () => {
@@ -1535,6 +1605,43 @@ describe('TopicModel - Query', () => {
       const result = await topicModel.queryRecent(2);
 
       expect(result).toHaveLength(2);
+    });
+
+    it('should order recent topics by latest message activity', async () => {
+      await serverDB.transaction(async (tx) => {
+        await tx.insert(agents).values([{ id: 'activity-agent', userId, title: 'Activity Agent' }]);
+        await tx.insert(topics).values([
+          {
+            agentId: 'activity-agent',
+            id: 'activity-topic-old-topic-row',
+            title: 'Older topic row',
+            updatedAt: new Date('2023-01-01'),
+            userId,
+          },
+          {
+            agentId: 'activity-agent',
+            id: 'activity-topic-new-topic-row',
+            title: 'Newer topic row',
+            updatedAt: new Date('2023-05-01'),
+            userId,
+          },
+        ]);
+        await tx.insert(messages).values({
+          id: 'activity-topic-latest-message',
+          role: 'user',
+          topicId: 'activity-topic-old-topic-row',
+          updatedAt: new Date('2023-06-01'),
+          userId,
+        });
+      });
+
+      const result = await topicModel.queryRecent();
+
+      expect(result.map((topic) => topic.id)).toEqual([
+        'activity-topic-old-topic-row',
+        'activity-topic-new-topic-row',
+      ]);
+      expect(result[0].updatedAt.toISOString()).toBe('2023-06-01T00:00:00.000Z');
     });
 
     it('should return null agentId when topic has groupId but no agentId', async () => {

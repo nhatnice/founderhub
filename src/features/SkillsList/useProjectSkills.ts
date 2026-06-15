@@ -2,8 +2,7 @@ import { type ListProjectSkillsResult, type ProjectSkillItem } from '@lobechat/e
 import path from 'pathe';
 import { useMemo } from 'react';
 
-import { useClientDataSWR } from '@/libs/swr';
-import { localFileService } from '@/services/electron/localFileService';
+import { useFetchProjectSkills } from '@/hooks/useFetchProjectSkills';
 import { useChatStore } from '@/store/chat';
 
 import type { SkillListItem } from './SkillsList';
@@ -21,17 +20,22 @@ export interface UseProjectSkillsResult {
  * `.agents/skills/` / `.claude/skills/` in `workingDirectory`. Powers both
  * the hetero `SkillsGroup` and the homogeneous `ProjectLevelSkills` section.
  *
- * Pass `undefined` to keep the hook inert (no fetch fires) — useful when the
- * caller hasn't decided whether to render the section yet.
+ * `deviceId` picks the transport: when set, the scan runs on that remote device
+ * via the `device.listProjectSkills` RPC; otherwise it goes through local
+ * Electron IPC. Like the Files tab, remote mode lists skills but does not open
+ * previews (the device's filesystem isn't reachable by the local viewer).
+ *
+ * Pass `undefined` workingDirectory to keep the hook inert (no fetch fires) —
+ * useful when the caller hasn't decided whether to render the section yet.
  */
-export const useProjectSkills = (workingDirectory: string | undefined): UseProjectSkillsResult => {
+export const useProjectSkills = (
+  workingDirectory: string | undefined,
+  deviceId?: string,
+): UseProjectSkillsResult => {
   const openLocalFile = useChatStore((s) => s.openLocalFile);
+  const isRemote = !!deviceId;
 
-  const { data, isLoading } = useClientDataSWR<ListProjectSkillsResult>(
-    workingDirectory ? ['project-skills', workingDirectory] : null,
-    () => localFileService.listProjectSkills({ scope: workingDirectory! }),
-    { revalidateOnFocus: false, shouldRetryOnError: false },
-  );
+  const { data, isLoading } = useFetchProjectSkills(workingDirectory, deviceId);
 
   // listProjectSkills approves `data.root` for preview. Hand that exact value
   // back to openLocalFile so LocalFileProtocolManager.createPreviewUrl's
@@ -58,6 +62,9 @@ export const useProjectSkills = (workingDirectory: string | undefined): UseProje
   }, [data?.skills]);
 
   const onOpenFile = (item: SkillListItem, relativePath: string) => {
+    // A remote device has no filesystem the local viewer can open (matches the
+    // Files tab); device mode lists skills but does not preview them.
+    if (isRemote) return;
     const skill = skillByDir.get(item.id);
     if (!skill) return;
     openLocalFile({
@@ -67,6 +74,7 @@ export const useProjectSkills = (workingDirectory: string | undefined): UseProje
   };
 
   const onOpenSkill = (item: SkillListItem) => {
+    if (isRemote) return;
     const skill = skillByDir.get(item.id);
     if (!skill) return;
     openLocalFile({ filePath: skill.path, workingDirectory: previewRoot });

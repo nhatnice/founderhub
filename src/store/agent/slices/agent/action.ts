@@ -9,9 +9,10 @@ import type { PartialDeep } from 'type-fest';
 
 import { MESSAGE_CANCEL_FLAT } from '@/const/message';
 import { mutate, useClientDataSWRWithSync } from '@/libs/swr';
-import type { CreateAgentParams, CreateAgentResult } from '@/services/agent';
-import { agentService } from '@/services/agent';
+import type { AvailableAgentItem, CreateAgentParams, CreateAgentResult } from '@/services/agent';
+import { agentService, AVAILABLE_AGENTS_CONTEXT_QUERY_LIMIT } from '@/services/agent';
 import {
+  type AgentDocumentListItem,
   agentDocumentService,
   agentDocumentSWRKeys,
   resolveAgentDocumentsContext,
@@ -25,7 +26,6 @@ import type {
   LobeAgentConfig,
   RuntimeEnvConfig,
 } from '@/types/agent';
-import { toAgentContextDocuments } from '@/utils/agentDocumentContextMapping';
 import { merge } from '@/utils/merge';
 
 import type { AgentStore } from '../../store';
@@ -33,6 +33,11 @@ import { setLocalAgentWorkingDirectory } from '../../utils/localAgentWorkingDire
 import type { AgentSliceState, LoadingState, SaveStatus } from './initialState';
 
 const FETCH_AGENT_CONFIG_KEY = 'FETCH_AGENT_CONFIG';
+const FETCH_AVAILABLE_AGENTS_KEY = 'FETCH_AVAILABLE_AGENTS';
+const FETCH_AVAILABLE_AGENTS_SWR_KEY = [
+  FETCH_AVAILABLE_AGENTS_KEY,
+  AVAILABLE_AGENTS_CONTEXT_QUERY_LIMIT,
+] as const;
 type AgentMetaUpdate = Partial<
   Pick<
     AgentItem,
@@ -80,6 +85,7 @@ export class AgentSliceActionImpl {
 
   createAgent = async (params: CreateAgentParams): Promise<CreateAgentResult> => {
     const result = await agentService.createAgent(params);
+    this.#get().invalidateAvailableAgents();
 
     // Track new agent creation analytics
     const analytics = getSingletonAnalyticsOptional();
@@ -156,6 +162,13 @@ export class AgentSliceActionImpl {
 
   toggleAgentPinned = (): void => {
     this.#set((state) => ({ isAgentPinned: !state.isAgentPinned }), false, 'toggleAgentPinned');
+  };
+
+  transferAgent = async (
+    agentId: string,
+    targetWorkspaceId: string | null,
+  ): Promise<{ agentId: string; slug: string | null }> => {
+    return agentService.transferAgent(agentId, targetWorkspaceId);
   };
 
   toggleAgentPlugin = async (pluginId: string, state?: boolean): Promise<void> => {
@@ -292,8 +305,50 @@ export class AgentSliceActionImpl {
           if (!data) return;
           this.#get().internal_dispatchAgentMap(agentId, data);
           this.#set({ activeAgentId: data.id }, false, 'fetchAgentConfig');
+          this.#clearAgentConfigError(agentId);
+        },
+        onError: (error) => {
+          this.#set(
+            (state) => ({
+              agentConfigErrorMap: {
+                ...state.agentConfigErrorMap,
+                [agentId]: error?.message || String(error),
+              },
+            }),
+            false,
+            'fetchAgentConfig/error',
+          );
         },
       },
+    );
+  };
+
+  /**
+   * Re-trigger the agent config fetch after a failure. Clears the recorded
+   * error first so consumers fall back to the loading skeleton, then
+   * revalidates every SWR entry for this agent (keys may carry a workspace
+   * suffix, hence the filter form).
+   */
+  retryAgentConfigFetch = async (agentId?: string): Promise<void> => {
+    const id = agentId ?? this.#get().activeAgentId;
+    if (!id) return;
+
+    this.#clearAgentConfigError(id);
+
+    await mutate((key) => Array.isArray(key) && key[0] === FETCH_AGENT_CONFIG_KEY && key[1] === id);
+  };
+
+  #clearAgentConfigError = (agentId: string) => {
+    if (!this.#get().agentConfigErrorMap[agentId]) return;
+
+    this.#set(
+      (state) => {
+        const next = { ...state.agentConfigErrorMap };
+        delete next[agentId];
+        return { agentConfigErrorMap: next };
+      },
+      false,
+      'clearAgentConfigError',
     );
   };
 
@@ -321,20 +376,32 @@ export class AgentSliceActionImpl {
     );
   };
 
-  useFetchAgentDocuments = (agentId?: string | null): SWRResponse<AgentContextDocument[]> => {
-    return useClientDataSWRWithSync<AgentContextDocument[]>(
-      agentId ? agentDocumentSWRKeys.documents(agentId) : null,
-      async () =>
-        toAgentContextDocuments(await agentDocumentService.getDocuments({ agentId: agentId! })),
+  useFetchAgentDocuments = (agentId?: string | null): SWRResponse<AgentDocumentListItem[]> => {
+    return useClientDataSWRWithSync<AgentDocumentListItem[]>(
+      agentId ? agentDocumentSWRKeys.documentsList(agentId) : null,
+      async () => agentDocumentService.listDocuments({ agentId: agentId! }),
+      {
+        revalidateOnFocus: false,
+      },
+    );
+  };
+
+  useFetchAvailableAgents = (enabled: boolean): SWRResponse<AvailableAgentItem[]> => {
+    return useClientDataSWRWithSync<AvailableAgentItem[]>(
+      enabled ? FETCH_AVAILABLE_AGENTS_SWR_KEY : null,
+      () => agentService.queryAgents({ limit: AVAILABLE_AGENTS_CONTEXT_QUERY_LIMIT }),
       {
         onData: (data) => {
-          if (!agentId) return;
-
-          this.#syncAgentDocuments(agentId, data);
+          this.#set({ availableAgents: data }, false, 'useFetchAvailableAgents');
         },
         revalidateOnFocus: false,
       },
     );
+  };
+
+  invalidateAvailableAgents = (): void => {
+    this.#set({ availableAgents: undefined }, false, 'invalidateAvailableAgents');
+    void mutate(FETCH_AVAILABLE_AGENTS_SWR_KEY);
   };
 
   ensureAgentDocuments = async (
@@ -397,6 +464,7 @@ export class AgentSliceActionImpl {
       // 3. Use returned data directly (no refetch needed!)
       if (result?.success && result.agent) {
         internal_dispatchAgentMap(id, result.agent);
+        this.#get().invalidateAvailableAgents();
       }
       updateSaveStatus('saved');
     } catch (error: any) {
@@ -427,6 +495,7 @@ export class AgentSliceActionImpl {
       // 3. Use returned data directly (no refetch needed!)
       if (result?.success && result.agent) {
         internal_dispatchAgentMap(id, result.agent);
+        this.#get().invalidateAvailableAgents();
       }
       updateSaveStatus('saved');
     } catch (error: any) {

@@ -30,11 +30,12 @@ import {
 } from 'drizzle-orm';
 
 import type { TopicItem } from '../schemas';
-import { agents, messagePlugins, messages, topics } from '../schemas';
+import { agents, messagePlugins, messages, threads, topics } from '../schemas';
 import type { LobeChatDatabase } from '../type';
 import { sanitizeBm25Query } from '../utils/bm25';
 import { genEndDateWhere, genRangeWhere, genStartDateWhere, genWhere } from '../utils/genWhere';
 import { idGenerator } from '../utils/idGenerator';
+import { buildWorkspacePayload, buildWorkspaceWhere } from '../utils/workspace';
 import { recomputeTopicUsage } from './topicUsage';
 
 type OnboardingSessionMetadataPatch = Partial<NonNullable<ChatTopicMetadata['onboardingSession']>>;
@@ -115,34 +116,44 @@ export interface ListTopicsForMemoryExtractorCursor {
 }
 
 // Status priority for the sidebar "group by status" ordering. Lower rank =
-// higher in the list. A NULL / unknown status falls through to `active` (2),
+// higher in the list. A NULL / unknown status falls through to `active` (3),
 // matching the client which treats a missing status as active. Keep this in
-// sync with `STATUS_GROUP_ORDER` in `@lobechat/utils` (client-side bucketing).
+// sync with `STATUS_GROUP_ORDER` / `resolveStatusBucket` in `@lobechat/utils`
+// (client-side bucketing): `waitingForHuman` and `failed` both collapse into the
+// top `pending` bucket, so they must float to the top here too — otherwise a
+// failed topic could fall off the first page and vanish from the pending group.
 const STATUS_SORT_RANK = sql`CASE ${topics.status}
   WHEN 'waitingForHuman' THEN 0
-  WHEN 'running' THEN 1
-  WHEN 'active' THEN 2
-  WHEN 'paused' THEN 3
-  WHEN 'failed' THEN 4
+  WHEN 'failed' THEN 1
+  WHEN 'running' THEN 2
+  WHEN 'active' THEN 3
+  WHEN 'paused' THEN 4
   WHEN 'completed' THEN 5
   WHEN 'archived' THEN 6
-  ELSE 2 END`;
+  ELSE 3 END`;
 
 // Favorites always float to the top; the rest are ordered by the requested
 // strategy. `status` adds the priority bucket before the recency tiebreaker.
-const buildTopicOrderBy = (sortBy?: TopicQuerySortBy): SQL[] =>
+const buildTopicOrderBy = (topicActivityAt: SQL, sortBy?: TopicQuerySortBy): SQL[] =>
   sortBy === 'status'
-    ? [desc(topics.favorite), asc(STATUS_SORT_RANK), desc(topics.updatedAt)]
-    : [desc(topics.favorite), desc(topics.updatedAt)];
+    ? [desc(topics.favorite), asc(STATUS_SORT_RANK), desc(topicActivityAt)]
+    : [desc(topics.favorite), desc(topicActivityAt)];
 
 export class TopicModel {
   private userId: string;
   private db: LobeChatDatabase;
+  private workspaceId?: string;
 
-  constructor(db: LobeChatDatabase, userId: string) {
+  constructor(db: LobeChatDatabase, userId: string, workspaceId?: string) {
     this.userId = userId;
     this.db = db;
+    this.workspaceId = workspaceId;
   }
+
+  private ownership = () =>
+    buildWorkspaceWhere({ userId: this.userId, workspaceId: this.workspaceId }, topics);
+  private messageOwnership = () =>
+    buildWorkspaceWhere({ userId: this.userId, workspaceId: this.workspaceId }, messages);
   // **************** Query *************** //
 
   query = async ({
@@ -160,7 +171,6 @@ export class TopicModel {
     triggers,
     withDetails = false,
   }: QueryTopicParams = {}) => {
-    const orderBy = buildTopicOrderBy(sortBy);
     const queryStartedAt = Date.now();
     logTiming(timing, 'db.topic.query:start', {
       current,
@@ -197,6 +207,17 @@ export class TopicModel {
       .select({ value: sql<number>`count(*)::int` })
       .from(messages)
       .where(eq(messages.topicId, topics.id));
+    const latestMessageAtSubquery = this.db
+      .select({ value: messages.updatedAt })
+      .from(messages)
+      .where(and(eq(messages.topicId, topics.id), this.messageOwnership()))
+      .orderBy(desc(messages.updatedAt))
+      .limit(1);
+    const topicActivityAt =
+      sql<Date>`COALESCE((${latestMessageAtSubquery}), ${topics.updatedAt})`.mapWith(
+        topics.updatedAt,
+      );
+    const orderBy = buildTopicOrderBy(topicActivityAt, sortBy);
 
     const detailColumns = withDetails
       ? {
@@ -231,7 +252,7 @@ export class TopicModel {
     // If groupId is provided, query topics by groupId directly
     if (groupId) {
       const whereCondition = and(
-        eq(topics.userId, this.userId),
+        this.ownership(),
         eq(topics.groupId, groupId),
         includeTriggerCondition,
         excludeTriggerCondition,
@@ -296,7 +317,7 @@ export class TopicModel {
         : eq(topics.agentId, agentId);
 
       const agentWhere = and(
-        eq(topics.userId, this.userId),
+        this.ownership(),
         agentCondition,
         includeTriggerCondition,
         excludeTriggerCondition,
@@ -352,7 +373,7 @@ export class TopicModel {
 
     // Fallback to containerId-based query (backward compatibility)
     const whereCondition = and(
-      eq(topics.userId, this.userId),
+      this.ownership(),
       this.matchContainer(containerId),
       includeTriggerCondition,
       excludeTriggerCondition,
@@ -411,16 +432,12 @@ export class TopicModel {
 
   findById = async (id: string) => {
     return this.db.query.topics.findFirst({
-      where: and(eq(topics.id, id), eq(topics.userId, this.userId)),
+      where: and(eq(topics.id, id), this.ownership()),
     });
   };
 
   queryAll = async (): Promise<TopicItem[]> => {
-    return this.db
-      .select()
-      .from(topics)
-      .orderBy(topics.updatedAt)
-      .where(eq(topics.userId, this.userId));
+    return this.db.select().from(topics).orderBy(topics.updatedAt).where(and(this.ownership()));
   };
 
   queryByKeyword = async (keyword: string, containerId?: string | null): Promise<TopicItem[]> => {
@@ -436,7 +453,7 @@ export class TopicModel {
         .from(topics)
         .where(
           and(
-            eq(topics.userId, this.userId),
+            this.ownership(),
             this.matchContainer(containerId),
             sql`${topics.title} @@@ ${bm25Query}`,
           ),
@@ -449,9 +466,9 @@ export class TopicModel {
         .innerJoin(topics, eq(messages.topicId, topics.id))
         .where(
           and(
-            eq(messages.userId, this.userId),
+            this.messageOwnership(),
             sql`${messages.content} @@@ ${bm25Query}`,
-            eq(topics.userId, this.userId),
+            this.ownership(),
             this.matchContainer(containerId),
           ),
         )
@@ -469,7 +486,7 @@ export class TopicModel {
 
     const topicsByMessages = await this.db.query.topics.findMany({
       orderBy: [desc(topics.updatedAt)],
-      where: and(eq(topics.userId, this.userId), inArray(topics.id, topicIds)),
+      where: and(this.ownership(), inArray(topics.id, topicIds)),
     });
 
     // Merge results and deduplicate
@@ -506,7 +523,7 @@ export class TopicModel {
       .from(topics)
       .where(
         genWhere([
-          eq(topics.userId, this.userId),
+          this.ownership(),
           agentCondition,
           params?.containerId ? this.matchContainer(params.containerId) : undefined,
           params?.range
@@ -533,7 +550,7 @@ export class TopicModel {
         title: topics.title,
       })
       .from(topics)
-      .where(and(eq(topics.userId, this.userId)))
+      .where(and(this.ownership()))
       .leftJoin(messages, eq(topics.id, messages.topicId))
       .groupBy(topics.id)
       .orderBy(desc(sql`count`))
@@ -549,6 +566,17 @@ export class TopicModel {
    * - For inbox: includes topics with slug='inbox'
    */
   queryRecent = async (limit: number = 12) => {
+    const latestMessageAtSubquery = this.db
+      .select({ value: messages.updatedAt })
+      .from(messages)
+      .where(and(eq(messages.topicId, topics.id), this.messageOwnership()))
+      .orderBy(desc(messages.updatedAt))
+      .limit(1);
+    const topicActivityAt =
+      sql<Date>`COALESCE((${latestMessageAtSubquery}), ${topics.updatedAt})`.mapWith(
+        topics.updatedAt,
+      );
+
     const result = await this.db
       .select({
         agentId: topics.agentId,
@@ -556,13 +584,13 @@ export class TopicModel {
         id: topics.id,
         sessionId: topics.sessionId,
         title: topics.title,
-        updatedAt: topics.updatedAt,
+        updatedAt: topicActivityAt,
       })
       .from(topics)
       .leftJoin(agents, eq(topics.agentId, agents.id))
       .where(
         and(
-          eq(topics.userId, this.userId),
+          this.ownership(),
           or(
             // Group topics: has groupId
             not(isNull(topics.groupId)),
@@ -573,12 +601,13 @@ export class TopicModel {
           ),
         ),
       )
-      .orderBy(desc(topics.updatedAt))
+      .orderBy(desc(topicActivityAt))
       .limit(limit);
 
     return result.map((item) => ({
       ...item,
       type: item.groupId ? ('group' as const) : ('agent' as const),
+      updatedAt: item.updatedAt instanceof Date ? item.updatedAt : new Date(item.updatedAt),
     }));
   };
 
@@ -589,14 +618,16 @@ export class TopicModel {
     id: string = this.genId(),
     timing?: ModelTimingContext,
   ): Promise<TopicItem> => {
-    const insertData = {
-      ...params,
-      agentId: params.agentId || null,
-      groupId: params.groupId || null,
-      id,
-      sessionId: params.sessionId || null,
-      userId: this.userId,
-    };
+    const insertData = buildWorkspacePayload(
+      { userId: this.userId, workspaceId: this.workspaceId },
+      {
+        ...params,
+        agentId: params.agentId || null,
+        groupId: params.groupId || null,
+        id,
+        sessionId: params.sessionId || null,
+      },
+    );
     const insertMeta = {
       hasAgentId: !!params.agentId,
       hasGroupId: !!params.groupId,
@@ -635,7 +666,7 @@ export class TopicModel {
               tx
                 .update(messages)
                 .set({ topicId: topic.id })
-                .where(and(eq(messages.userId, this.userId), inArray(messages.id, messageIds))),
+                .where(and(this.messageOwnership(), inArray(messages.id, messageIds))),
             { messageCount: messageIds.length },
           );
 
@@ -657,16 +688,20 @@ export class TopicModel {
       const createdTopics = await tx
         .insert(topics)
         .values(
-          topicParams.map((params) => ({
-            agentId: params.agentId || null,
-            favorite: params.favorite,
-            groupId: params.sessionId ? null : params.groupId,
-            id: params.id || this.genId(),
-            sessionId: params.groupId ? null : params.sessionId,
-            title: params.title,
-            trigger: params.trigger,
-            userId: this.userId,
-          })),
+          topicParams.map((params) =>
+            buildWorkspacePayload(
+              { userId: this.userId, workspaceId: this.workspaceId },
+              {
+                agentId: params.agentId || null,
+                favorite: params.favorite,
+                groupId: params.sessionId ? null : params.groupId,
+                id: params.id || this.genId(),
+                sessionId: params.groupId ? null : params.sessionId,
+                title: params.title,
+                trigger: params.trigger,
+              },
+            ),
+          ),
         )
         .returning();
 
@@ -678,7 +713,7 @@ export class TopicModel {
             await tx
               .update(messages)
               .set({ topicId: topic.id })
-              .where(and(eq(messages.userId, this.userId), inArray(messages.id, messageIds)));
+              .where(and(this.messageOwnership(), inArray(messages.id, messageIds)));
           }
         }),
       );
@@ -691,7 +726,7 @@ export class TopicModel {
     return this.db.transaction(async (tx) => {
       // find original topic
       const originalTopic = await tx.query.topics.findFirst({
-        where: and(eq(topics.id, topicId), eq(topics.userId, this.userId)),
+        where: and(eq(topics.id, topicId), this.ownership()),
       });
 
       if (!originalTopic) {
@@ -701,19 +736,24 @@ export class TopicModel {
       // copy topic
       const [duplicatedTopic] = await tx
         .insert(topics)
-        .values({
-          ...originalTopic,
-          clientId: null,
-          id: this.genId(),
-          title: newTitle || originalTopic?.title,
-        })
+        .values(
+          buildWorkspacePayload(
+            { userId: this.userId, workspaceId: this.workspaceId },
+            {
+              ...originalTopic,
+              clientId: null,
+              id: this.genId(),
+              title: newTitle || originalTopic?.title,
+            },
+          ),
+        )
         .returning();
 
       // Find messages associated with the original topic, ordered by createdAt
       const originalMessages = await tx
         .select()
         .from(messages)
-        .where(and(eq(messages.topicId, topicId), eq(messages.userId, this.userId)))
+        .where(and(eq(messages.topicId, topicId), this.messageOwnership()))
         .orderBy(messages.createdAt);
 
       // Find all messagePlugins for this topic
@@ -797,47 +837,39 @@ export class TopicModel {
    * Delete a session, also delete all messages and topics associated with it.
    */
   delete = async (id: string) => {
-    return this.db.delete(topics).where(and(eq(topics.id, id), eq(topics.userId, this.userId)));
+    return this.db.delete(topics).where(and(eq(topics.id, id), this.ownership()));
   };
 
   /**
    * Deletes multiple topics based on the sessionId.
    */
   batchDeleteBySessionId = async (sessionId?: string | null) => {
-    return this.db
-      .delete(topics)
-      .where(and(this.matchSession(sessionId), eq(topics.userId, this.userId)));
+    return this.db.delete(topics).where(and(this.matchSession(sessionId), this.ownership()));
   };
 
   /**
    * Deletes multiple topics based on the groupId.
    */
   batchDeleteByGroupId = async (groupId?: string | null) => {
-    return this.db
-      .delete(topics)
-      .where(and(this.matchGroup(groupId), eq(topics.userId, this.userId)));
+    return this.db.delete(topics).where(and(this.matchGroup(groupId), this.ownership()));
   };
 
   /**
    * Deletes all topics matching the given agentId (`topics.agentId`).
    */
   batchDeleteByAgentId = async (agentId: string) => {
-    return this.db
-      .delete(topics)
-      .where(and(eq(topics.userId, this.userId), eq(topics.agentId, agentId)));
+    return this.db.delete(topics).where(and(this.ownership(), eq(topics.agentId, agentId)));
   };
 
   /**
    * Deletes multiple topics and all messages associated with them in a transaction.
    */
   batchDelete = async (ids: string[]) => {
-    return this.db
-      .delete(topics)
-      .where(and(inArray(topics.id, ids), eq(topics.userId, this.userId)));
+    return this.db.delete(topics).where(and(inArray(topics.id, ids), this.ownership()));
   };
 
   deleteAll = async () => {
-    return this.db.delete(topics).where(eq(topics.userId, this.userId));
+    return this.db.delete(topics).where(and(this.ownership()));
   };
 
   // **************** Update *************** //
@@ -846,8 +878,72 @@ export class TopicModel {
     return this.db
       .update(topics)
       .set({ ...data, updatedAt: new Date() })
-      .where(and(eq(topics.id, id), eq(topics.userId, this.userId)))
+      .where(and(eq(topics.id, id), this.ownership()))
       .returning();
+  };
+
+  /**
+   * Move multiple topics (and all their messages) to another agent.
+   *
+   * Reassigns ownership purely through the `agentId` foreign key (the new data
+   * model). Every child entity of the topic that carries its own `agentId` FK
+   * MUST be updated together — `topics`, `messages`, and `threads`. Topic lists
+   * query by `topics.agentId` and message queries filter by `messages.agentId`,
+   * so updating only the topic would leave the moved conversation showing up
+   * empty under the target agent; and `threads.agentId` is itself a
+   * cascade-on-delete FK, so a thread left pointing at the source agent would
+   * be destroyed if that agent is later deleted.
+   *
+   * `sessionId` is cleared on `topics` and `messages` so the rows fully detach
+   * from the source agent's legacy session and can't leak back through the
+   * sessionId-based legacy query fallback (`threads` has no `sessionId`).
+   *
+   * Topics can only be moved to an agent owned by the same user/workspace. The
+   * target agent is verified with the same ownership predicate before applying
+   * the move — `topics.agentId` / `messages.agentId` are plain FKs to
+   * `agents.id` with cascade-on-delete, so attaching rows to a foreign agent
+   * would both leak them across tenants and risk losing them if that agent is
+   * later deleted.
+   */
+  batchMoveToAgent = async (topicIds: string[], targetAgentId: string) => {
+    if (topicIds.length === 0) return;
+
+    return this.db.transaction(async (tx) => {
+      const [targetAgent] = await tx
+        .select({ id: agents.id })
+        .from(agents)
+        .where(
+          and(
+            eq(agents.id, targetAgentId),
+            buildWorkspaceWhere({ userId: this.userId, workspaceId: this.workspaceId }, agents),
+          ),
+        )
+        .limit(1);
+
+      if (!targetAgent) {
+        throw new Error(`Target agent ${targetAgentId} not found or not accessible`);
+      }
+
+      await tx
+        .update(topics)
+        .set({ agentId: targetAgentId, sessionId: null, updatedAt: new Date() })
+        .where(and(inArray(topics.id, topicIds), this.ownership()));
+
+      await tx
+        .update(messages)
+        .set({ agentId: targetAgentId, sessionId: null })
+        .where(and(inArray(messages.topicId, topicIds), this.messageOwnership()));
+
+      await tx
+        .update(threads)
+        .set({ agentId: targetAgentId })
+        .where(
+          and(
+            inArray(threads.topicId, topicIds),
+            buildWorkspaceWhere({ userId: this.userId, workspaceId: this.workspaceId }, threads),
+          ),
+        );
+    });
   };
 
   /**
@@ -857,7 +953,7 @@ export class TopicModel {
    * external callers use this wrapper. Runs in a transaction for consistency.
    */
   recomputeUsage = async (id: string) =>
-    this.db.transaction((trx) => recomputeTopicUsage(trx, this.userId, id));
+    this.db.transaction((trx) => recomputeTopicUsage(trx, this.userId, id, this.workspaceId));
 
   /**
    * Update topic metadata with merge logic
@@ -867,7 +963,7 @@ export class TopicModel {
     // Get existing topic to merge metadata
     const existing = await this.db.query.topics.findFirst({
       columns: { metadata: true },
-      where: and(eq(topics.id, id), eq(topics.userId, this.userId)),
+      where: and(eq(topics.id, id), this.ownership()),
     });
 
     const mergedOnboardingSession =
@@ -887,7 +983,7 @@ export class TopicModel {
     return this.db
       .update(topics)
       .set({ metadata: mergedMetadata })
-      .where(and(eq(topics.id, id), eq(topics.userId, this.userId)))
+      .where(and(eq(topics.id, id), this.ownership()))
       .returning();
   };
 
@@ -899,7 +995,7 @@ export class TopicModel {
       .from(topics)
       .where(
         and(
-          eq(topics.userId, this.userId),
+          this.ownership(),
           eq(topics.agentId, agentId),
           eq(topics.trigger, 'cron'),
           sql`(${topics.metadata}->>'cronJobId') IS NOT NULL`,
@@ -967,7 +1063,7 @@ export class TopicModel {
       limit: options.limit,
       orderBy: (fields, { asc }) => [asc(fields.createdAt), asc(fields.id)],
       where: and(
-        eq(topics.userId, this.userId),
+        this.ownership(),
         options.startDate ? gte(topics.createdAt, options.startDate) : undefined,
         options.endDate ? lte(topics.createdAt, options.endDate) : undefined,
         options.ignoreExtracted
@@ -993,7 +1089,7 @@ export class TopicModel {
       .from(topics)
       .where(
         and(
-          eq(topics.userId, this.userId),
+          this.ownership(),
           options.startDate ? gte(topics.createdAt, options.startDate) : undefined,
           options.endDate ? lte(topics.createdAt, options.endDate) : undefined,
           options.ignoreExtracted
