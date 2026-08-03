@@ -1,10 +1,9 @@
+import type { SFSymbol } from '@lobechat/electron-client-ipc';
 import {
   type ActionIconGroupEvent,
   type ActionIconGroupItemType,
-  type DropdownItem,
   type GenericItemType,
 } from '@lobehub/ui';
-import { createRawModal, showContextMenu } from '@lobehub/ui';
 import { App } from 'antd';
 import isEqual from 'fast-deep-equal';
 import { type MouseEvent, type ReactNode } from 'react';
@@ -12,28 +11,31 @@ import { useCallback, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { MSG_CONTENT_CLASSNAME } from '@/features/Conversation/ChatItem/components/MessageContent';
+import { resolveHeteroErroredStepId } from '@/features/Conversation/Error/heterogeneous';
 import { usePermission } from '@/hooks/usePermission';
+import { showContextMenu } from '@/libs/contextMenu';
+import type { NativeContextMenuItem } from '@/libs/contextMenu/types';
 import { useSessionStore } from '@/store/session';
 import { sessionSelectors } from '@/store/session/selectors';
 import { useUserStore } from '@/store/user';
 import { userGeneralSettingsSelectors } from '@/store/user/selectors';
 
-import { type ShareModalProps } from '../components/ShareMessageModal';
-import ShareMessageModal from '../components/ShareMessageModal';
+import { openShareMessageModal } from '../components/ShareMessageModal';
 import {
   createStore,
   dataSelectors,
   messageStateSelectors,
-  Provider,
   useConversationStore,
   useConversationStoreApi,
 } from '../store';
 import { useChatListActionsBar } from './useChatListActionsBar';
+import { useConversationResourceAccess } from './useConversationResourceAccess';
 
 interface ActionMenuItem extends ActionIconGroupItemType {
   children?: { key: string; label: ReactNode }[];
   disable?: boolean;
   popupClassName?: string;
+  sfSymbol?: SFSymbol;
 }
 
 type MenuItem = ActionMenuItem | { type: 'divider' };
@@ -55,8 +57,13 @@ export const useChatItemContextMenu = ({
   const contextMenuMode = useUserStore(userGeneralSettingsSelectors.contextMenuMode);
   const { message } = App.useApp();
   const { t } = useTranslation('common');
-  const { allowed: canCreate } = usePermission('create_content');
-  const { allowed: canEdit } = usePermission('edit_own_content');
+  const { allowed: canCreateContent } = usePermission('create_content');
+  const { allowed: canEditContent } = usePermission('edit_own_content');
+  // Mutating menu entries need the workspace-role capability AND use-level
+  // General access on this conversation's agent/group (view-only = read-only).
+  const { canUseResource } = useConversationResourceAccess();
+  const canCreate = canCreateContent && canUseResource;
+  const canEdit = canEditContent && canUseResource;
 
   const selectedTextRef = useRef<string | undefined>(undefined);
 
@@ -85,26 +92,28 @@ export const useChatItemContextMenu = ({
     regenerateUserMessage,
     regenerateAssistantMessage,
     translateMessage,
-    ttsMessage,
+    startMessageTTS,
     delAndRegenerateMessage,
     copyMessage,
     openThreadCreator,
     resendThreadMessage,
     delAndResendThreadMessage,
     toggleMessageCollapsed,
+    deleteAssistantMessage,
   ] = useConversationStore((s) => [
     s.toggleMessageEditing,
     s.deleteMessage,
     s.regenerateUserMessage,
     s.regenerateAssistantMessage,
     s.translateMessage,
-    s.ttsMessage,
+    s.startMessageTTS,
     s.delAndRegenerateMessage,
     s.copyMessage,
     s.openThreadCreator,
     s.resendThreadMessage,
     s.delAndResendThreadMessage,
     s.toggleMessageCollapsed,
+    s.deleteAssistantMessage,
   ]);
 
   const getMessage = useCallback(
@@ -222,26 +231,14 @@ export const useChatItemContextMenu = ({
     const item = getMessage();
     if (!item || item.role !== 'assistant') return;
 
-    createRawModal(
-      (props: ShareModalProps) => (
-        <Provider
-          createStore={() => {
-            const state = storeApi.getState();
-            return createStore({
-              context: state.context,
-              hooks: state.hooks,
-              skipFetch: state.skipFetch,
-            });
-          }}
-        >
-          <ShareMessageModal {...props} />
-        </Provider>
-      ),
-      {
-        message: item,
-      },
-      { onCloseKey: 'onCancel', openKey: 'open' },
-    );
+    openShareMessageModal(item, () => {
+      const state = storeApi.getState();
+      return createStore({
+        context: state.context,
+        hooks: state.hooks,
+        skipFetch: state.skipFetch,
+      });
+    });
   }, [getMessage, storeApi]);
 
   const handleAction = useCallback(
@@ -277,7 +274,11 @@ export const useChatItemContextMenu = ({
         }
         case 'del': {
           if (!canEdit) break;
-          deleteMessage(id);
+          // Mirrors the action bar's `del`: on a heterogeneous run that only
+          // failed on its tail step, drop that step instead of the whole run.
+          const erroredStepId = resolveHeteroErroredStepId(item);
+          if (erroredStepId) deleteAssistantMessage(erroredStepId);
+          else deleteMessage(id);
           break;
         }
         case 'regenerate': {
@@ -304,7 +305,7 @@ export const useChatItemContextMenu = ({
         }
         case 'tts': {
           if (!canCreate) break;
-          ttsMessage(id);
+          startMessageTTS(id);
           break;
         }
         case 'share': {
@@ -324,6 +325,7 @@ export const useChatItemContextMenu = ({
       copyMessage,
       canCreate,
       canEdit,
+      deleteAssistantMessage,
       deleteMessage,
       delAndRegenerateMessage,
       delAndResendThreadMessage,
@@ -342,7 +344,7 @@ export const useChatItemContextMenu = ({
       toggleMessageEditing,
       topic,
       translateMessage,
-      ttsMessage,
+      startMessageTTS,
     ],
   );
 
@@ -379,7 +381,8 @@ export const useChatItemContextMenu = ({
         key: actionItem.key,
         label: actionItem.label,
         onClick: children ? undefined : handleMenuClick,
-      } satisfies DropdownItem;
+        sfSymbol: actionItem.sfSymbol,
+      } satisfies NativeContextMenuItem;
     });
   }, [handleMenuClick, menuItems]);
 

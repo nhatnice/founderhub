@@ -1,5 +1,6 @@
 import type {
   GetGitBranchDiffPayload,
+  GitAddWorktreeResult,
   GitAheadBehind,
   GitBranchDiffPatches,
   GitBranchInfo,
@@ -11,12 +12,15 @@ import type {
   GitPullResult,
   GitPushResult,
   GitRemoteBranchListItem,
+  GitRemoveWorktreeResult,
   GitRenameBranchResult,
   GitWorkingTreeFiles,
   GitWorkingTreePatches,
   GitWorkingTreeStatus,
+  GitWorktreeListItem,
 } from '@lobechat/electron-client-ipc';
 import {
+  addGitWorktree as runAddGitWorktree,
   checkoutGitBranch as runCheckoutGitBranch,
   deleteGitBranch as runDeleteGitBranch,
   type DeviceGitInfo,
@@ -30,8 +34,10 @@ import {
   gitInfo as computeGitInfo,
   listGitBranches as computeListGitBranches,
   listGitRemoteBranches as computeListGitRemoteBranches,
+  listGitWorktrees as computeListGitWorktrees,
   pullGitBranch as runPullGitBranch,
   pushGitBranch as runPushGitBranch,
+  removeGitWorktree as runRemoveGitWorktree,
   renameGitBranch as runRenameGitBranch,
   revertGitFile as runRevertGitFile,
 } from '@lobechat/local-file-shell';
@@ -69,6 +75,7 @@ export default class GitController extends ControllerModule {
   async getLinkedPullRequest(payload: {
     branch: string;
     path: string;
+    pullRequestNumber?: number;
   }): Promise<GitLinkedPullRequestResult> {
     return computeLinkedPullRequest(payload);
   }
@@ -81,6 +88,11 @@ export default class GitController extends ControllerModule {
   @IpcMethod()
   async listGitRemoteBranches(dirPath: string): Promise<GitRemoteBranchListItem[]> {
     return computeListGitRemoteBranches(dirPath);
+  }
+
+  @IpcMethod()
+  async listGitWorktrees(dirPath: string): Promise<GitWorktreeListItem[]> {
+    return computeListGitWorktrees(dirPath);
   }
 
   @IpcMethod()
@@ -129,6 +141,23 @@ export default class GitController extends ControllerModule {
   @IpcMethod()
   async deleteGitBranch(payload: { branch: string; path: string }): Promise<GitDeleteBranchResult> {
     return runDeleteGitBranch(payload);
+  }
+
+  @IpcMethod()
+  async removeGitWorktree(payload: {
+    path: string;
+    worktreePath: string;
+  }): Promise<GitRemoveWorktreeResult> {
+    return runRemoveGitWorktree(payload);
+  }
+
+  @IpcMethod()
+  async addGitWorktree(payload: {
+    branch: string;
+    path: string;
+    worktreePath: string;
+  }): Promise<GitAddWorktreeResult> {
+    return runAddGitWorktree(payload);
   }
 
   @IpcMethod()

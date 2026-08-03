@@ -1,10 +1,11 @@
 import { isDesktop } from '@lobechat/const';
 import { TITLE_BAR_HEIGHT } from '@lobechat/desktop-bridge';
 import { type LobeToolCustomPlugin } from '@lobechat/types';
-import { Button, Drawer, Flexbox } from '@lobehub/ui';
+import { Drawer, Flexbox } from '@lobehub/ui';
+import { Button } from '@lobehub/ui/base-ui';
 import { App, Form, Popconfirm } from 'antd';
 import { useResponsive } from 'antd-style';
-import { memo, useEffect, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import MCPManifestForm from './MCPManifestForm';
@@ -45,9 +46,20 @@ const DevModal = memo<DevModalProps>(
     const { mobile } = useResponsive();
     const [form] = Form.useForm();
     const authType = Form.useWatch(['customParams', 'mcp', 'auth', 'type'], form);
+
+    // Seed the form once per modal open, waiting for `value` to arrive (it may
+    // be undefined initially while edit-mode credentials are being fetched).
+    const seededRef = useRef(false);
     useEffect(() => {
-      form.setFieldsValue(value);
-    }, []);
+      if (!open) {
+        seededRef.current = false;
+        return;
+      }
+      if (value !== undefined && !seededRef.current) {
+        form.setFieldsValue(value);
+        seededRef.current = true;
+      }
+    }, [open, value]);
 
     const doSave = async (values: LobeToolCustomPlugin, ctx?: { oauthPopup?: Window | null }) => {
       if (!onSave) {
@@ -62,7 +74,15 @@ const DevModal = memo<DevModalProps>(
         onOpenChange(false);
       } catch (error) {
         console.error('[DevModal] Install failed:', error);
-        message.error(t('dev.saveError'));
+        const httpStatus = (error as { data?: { httpStatus?: number } })?.data?.httpStatus;
+        message.error(
+          httpStatus === 403
+            ? t(
+                'dev.permissionDenied',
+                'You are not allowed to modify this connector — only the creator or a workspace owner can',
+              )
+            : t('dev.saveError'),
+        );
       } finally {
         setSubmitting(false);
       }
@@ -158,6 +178,11 @@ const DevModal = memo<DevModalProps>(
           push={false}
           title={t(isEditMode ? 'dev.title.skillSettings' : 'dev.title.create')}
           width={mobile ? '100%' : 800}
+          // Sit above @lobehub/ui's base-ui floating layer (Popover/Dropdown/Tooltip = 1100).
+          // antd Drawer defaults to ~1000, so a config panel opened from the Tools skill
+          // popover would otherwise mount *behind* the still-open popover and look like it
+          // "didn't open". 1200 = the base-ui modal tier.
+          zIndex={1200}
           styles={{
             body: {
               padding: 0,

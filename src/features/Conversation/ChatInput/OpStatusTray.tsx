@@ -12,12 +12,7 @@ import { useChatStore } from '@/store/chat';
 import { operationSelectors } from '@/store/chat/selectors';
 import { AI_RUNTIME_OPERATION_TYPES } from '@/store/chat/slices/operation/types';
 import { shinyTextStyles } from '@/styles';
-import {
-  calculateOperationUsageMetrics,
-  hasOperationUsageMetrics,
-  mergeOperationUsageMetrics,
-  type OperationUsageMetrics,
-} from '@/utils/operationUsageMetrics';
+import { calculateOperationUsageMetrics } from '@/utils/operationUsageMetrics';
 
 import { contextSelectors, dataSelectors, useConversationStore } from '../store';
 import { type ActivityKey, resolveOperationActivity } from '../utils/operationActivity';
@@ -46,6 +41,15 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
   containerTopAttached: css`
     border-start-start-radius: 0;
     border-start-end-radius: 0;
+  `,
+  containerSeamless: css`
+    border: none;
+
+    /* keep a hairline divider on top so the tray still reads as separated from
+       the conversation above, even without the full card chrome */
+    border-block-start: 1px solid ${cssVar.colorBorderSecondary};
+    border-radius: 0;
+    background: transparent;
   `,
   divider: css`
     width: 1px;
@@ -171,6 +175,10 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
     transform-box: fill-box;
     fill: ${cssVar.colorPrimary};
     animation: op-status-tray-glyph-core 1.5s ease-in-out infinite;
+
+    @media (prefers-reduced-motion: reduce) {
+      animation: none;
+    }
   `,
   glyphOrbit: css`
     transform-origin: center;
@@ -183,6 +191,10 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
     stroke-width: 1.5;
 
     animation: op-status-tray-glyph-spin 2s linear infinite;
+
+    @media (prefers-reduced-motion: reduce) {
+      animation: none;
+    }
   `,
 }));
 
@@ -213,6 +225,11 @@ const normalizeStepCount = (stepCount: unknown) => {
 
 interface OpStatusTrayProps {
   /**
+   * Drop the card chrome (background, border, rounded corners) so the status
+   * reads as a plain inline row — used when nothing is flush below it to attach to.
+   */
+  seamless?: boolean;
+  /**
    * Square the top corners when another panel sits flush above this one.
    */
   topAttached?: boolean;
@@ -226,7 +243,7 @@ interface MetricItem {
   value: string;
 }
 
-const OpStatusTray = memo<OpStatusTrayProps>(({ topAttached }) => {
+const OpStatusTray = memo<OpStatusTrayProps>(({ seamless, topAttached }) => {
   const { t } = useTranslation(['chat', 'opStatusTray']);
   const context = useConversationStore(contextSelectors.context);
   const dbMessages = useConversationStore(dataSelectors.dbMessages);
@@ -238,11 +255,11 @@ const OpStatusTray = memo<OpStatusTrayProps>(({ topAttached }) => {
     let latestActivityStart = -1;
     let statusSeed: string | undefined;
     let stepCount = 0;
-    let usageMetrics: OperationUsageMetrics | undefined;
     const runtimeOperationIds: string[] = [];
 
     for (const op of ops) {
-      if (op.status !== 'running' || op.metadata.isAborting) continue;
+      if (op.status !== 'running' || op.metadata.isAborting || op.metadata.visibleLoadingDone)
+        continue;
 
       const mapped = resolveOperationActivity(op.type);
       if (mapped && op.metadata.startTime > latestActivityStart) {
@@ -256,9 +273,6 @@ const OpStatusTray = memo<OpStatusTrayProps>(({ topAttached }) => {
 
       runtimeOperationIds.push(op.id);
       stepCount = Math.max(stepCount, normalizeStepCount(op.metadata.stepCount));
-      if (hasOperationUsageMetrics(op.metadata.usageMetrics)) {
-        usageMetrics = mergeOperationUsageMetrics(usageMetrics, op.metadata.usageMetrics);
-      }
 
       if (earliestStart === undefined || op.metadata.startTime < earliestStart) {
         earliestStart = op.metadata.startTime;
@@ -271,7 +285,6 @@ const OpStatusTray = memo<OpStatusTrayProps>(({ topAttached }) => {
       startTime: earliestStart,
       statusSeed,
       steps: stepCount,
-      usageMetrics,
     };
   });
   const operationsByMessage = useChatStore((s) => s.operationsByMessage);
@@ -289,17 +302,16 @@ const OpStatusTray = memo<OpStatusTrayProps>(({ topAttached }) => {
     [operationState.operationIdsKey],
   );
 
-  // Fallback for older / reloaded operation state: derive usage from messages
-  // produced by this operation when live operation metadata is unavailable.
-  const fallbackMetrics = useMemo(() => {
+  // Single source of truth: derive the operation total from the same per-message
+  // usage shown on each bubble, so the tray always equals their sum. (Updates as
+  // messages refresh — no separate live accumulation that can drift.)
+  const usageMetrics = useMemo(() => {
     return calculateOperationUsageMetrics(dbMessages, operationIds, operationsByMessage);
   }, [dbMessages, operationIds, operationsByMessage]);
 
   if (!operationState.startTime) return null;
 
-  const { totalCost, totalTokens } = hasOperationUsageMetrics(operationState.usageMetrics)
-    ? operationState.usageMetrics
-    : fallbackMetrics;
+  const { totalCost, totalTokens } = usageMetrics;
   const elapsed = now - operationState.startTime;
   const costLabel = t('chat:opStatusTray.cost');
   const stepLabel = t('chat:opStatusTray.steps');
@@ -389,8 +401,12 @@ const OpStatusTray = memo<OpStatusTrayProps>(({ topAttached }) => {
     <Flexbox
       horizontal
       align="center"
-      className={cx(styles.container, topAttached && styles.containerTopAttached)}
       justify="space-between"
+      className={cx(
+        styles.container,
+        topAttached && styles.containerTopAttached,
+        seamless && styles.containerSeamless,
+      )}
     >
       <span className={cx(styles.metric, styles.statusMetric)}>
         <ActivityGlyph />

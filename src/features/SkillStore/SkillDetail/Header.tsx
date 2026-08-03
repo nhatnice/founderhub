@@ -1,7 +1,7 @@
 'use client';
 
 import { Avatar, Flexbox, Icon, Text, Tooltip, useModalContext } from '@lobehub/ui';
-import { Button } from 'antd';
+import { Button } from '@lobehub/ui/base-ui';
 import { cssVar } from 'antd-style';
 import { Loader2, Plus, SquareArrowOutUpRight } from 'lucide-react';
 import { memo, useEffect, useRef } from 'react';
@@ -26,7 +26,7 @@ const isEmojiOrText = (str: string): boolean => {
 };
 
 interface HeaderProps {
-  type: 'builtin' | 'klavis' | 'lobehub';
+  type: 'builtin' | 'composio' | 'lobehub';
 }
 
 const Header = memo<HeaderProps>(({ type }) => {
@@ -113,13 +113,13 @@ const Header = memo<HeaderProps>(({ type }) => {
       );
     }
 
-    // Handle Klavis/LobeHub skills
+    // Handle Composio/LobeHub skills
     if (isConnected) return null;
 
     if (isConnecting) {
       return (
         <Button disabled icon={<Icon spin icon={Loader2} />} type="default">
-          {t('tools.klavis.connect', { defaultValue: 'Connect' })}
+          {t('tools.composio.connect', { defaultValue: 'Connect' })}
         </Button>
       );
     }
@@ -132,7 +132,7 @@ const Header = memo<HeaderProps>(({ type }) => {
           type="primary"
           onClick={handleConnectWithTracking}
         >
-          {t('tools.klavis.connect', { defaultValue: 'Connect' })}
+          {t('tools.composio.connect', { defaultValue: 'Connect' })}
         </Button>
       </Tooltip>
     );

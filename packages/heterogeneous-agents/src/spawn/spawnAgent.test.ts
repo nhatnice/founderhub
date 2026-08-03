@@ -17,8 +17,7 @@ const execFileMock = vi.mocked(childProcess.execFile);
 const callExecFile = (stdout: string) => {
   execFileMock.mockImplementationOnce(((...args: unknown[]) => {
     const callback = [...args].reverse().find((arg) => typeof arg === 'function') as
-      | ((error: Error | null, stdout: string) => void)
-      | undefined;
+      ((error: Error | null, stdout: string) => void) | undefined;
     callback?.(null, stdout);
     return {} as childProcess.ChildProcess;
   }) as typeof childProcess.execFile);
@@ -134,12 +133,11 @@ describe('spawnAgent', () => {
     expect(call.args).toContain('--output-format');
     expect(call.args.filter((a) => a === 'stream-json')).toHaveLength(2);
     expect(call.args).toContain('-p');
-    // CC's built-in interactive Q&A is disabled at every spawn site so the
-    // model degrades to plain-text questioning instead of stalling on a
-    // synthetic "Answer questions?" tool_result.
+    // These tools are disabled at every spawn site so CC does not stall on
+    // built-in interactive Q&A or wakeup/monitor lifecycle calls.
     const disallowedIdx = call.args.indexOf('--disallowedTools');
     expect(disallowedIdx).toBeGreaterThan(-1);
-    expect(call.args[disallowedIdx + 1]).toBe('AskUserQuestion');
+    expect(call.args[disallowedIdx + 1]).toBe('AskUserQuestion,Monitor,ScheduleWakeup');
     // Partial deltas are opt-in — terminal/sandbox callers want fewer events.
     expect(call.args).not.toContain('--include-partial-messages');
     // Prompt MUST go through stdin as a stream-json user message — never as argv.
@@ -181,6 +179,48 @@ describe('spawnAgent', () => {
     const resumeIdx = args.indexOf('--resume');
     expect(resumeIdx).toBeGreaterThan(-1);
     expect(args[resumeIdx + 1]).toBe('cc-prev-123');
+  });
+
+  it('spawns AMP with its private headless stream-json protocol', async () => {
+    nextFakeProc = createFakeProc().proc;
+    const { spawnAgent } = await import('./spawnAgent');
+    await spawnAgent({ agentType: 'amp', operationId: 'op-amp', prompt: 'hello' });
+
+    const { args, command } = spawnCalls[0];
+    expect(command).toBe('amp');
+    expect(args).toEqual([
+      '--execute',
+      '--stream-json-thinking',
+      '--stream-json-input',
+      '--visibility',
+      'private',
+      '--no-ide',
+      '--no-notifications',
+      '--no-archive-after-execute',
+    ]);
+    expect(JSON.parse((nextFakeProc as any).stdin.write.mock.calls[0][0].trim())).toMatchObject({
+      message: { content: [{ text: 'hello', type: 'text' }], role: 'user' },
+      type: 'user',
+    });
+  });
+
+  it('uses `threads continue <id>` before AMP execution flags on resume', async () => {
+    nextFakeProc = createFakeProc().proc;
+    const { spawnAgent } = await import('./spawnAgent');
+    await spawnAgent({
+      agentType: 'amp',
+      operationId: 'op-amp',
+      prompt: 'continue',
+      resumeSessionId: 'T-previous',
+    });
+
+    expect(spawnCalls[0].args.slice(0, 4)).toEqual([
+      'threads',
+      'continue',
+      'T-previous',
+      '--execute',
+    ]);
+    expect(spawnCalls[0].args).toContain('--stream-json-input');
   });
 
   it('builds codex args with `exec` + json + skip-git-repo-check + bypass approvals/sandbox', async () => {
@@ -244,6 +284,58 @@ describe('spawnAgent', () => {
     expect(args.at(-1)).toBe('-');
   });
 
+  it('spawns OpenCode fresh with JSON thinking/auto flags and raw stdin', async () => {
+    nextFakeProc = createFakeProc().proc;
+    const { OPENCODE_BASE_ARGS, spawnAgent } = await import('./spawnAgent');
+    await spawnAgent({
+      agentType: 'opencode',
+      extraArgs: ['--model', 'anthropic/claude-sonnet-4'],
+      operationId: 'op-open',
+      prompt: 'hello opencode',
+    });
+
+    expect(spawnCalls[0]).toMatchObject({ command: 'opencode' });
+    expect(spawnCalls[0].args).toEqual([
+      ...OPENCODE_BASE_ARGS,
+      '--model',
+      'anthropic/claude-sonnet-4',
+    ]);
+    expect((nextFakeProc as any).stdin.write.mock.calls[0][0]).toBe('hello opencode');
+  });
+
+  it('spawns OpenCode resume with --session and --file before extra args', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'lobe-opencode-spawn-'));
+    tempDirs.push(dir);
+    const imagePath = path.join(dir, 'input.png');
+    await writeFile(imagePath, 'image');
+    nextFakeProc = createFakeProc().proc;
+    const { spawnAgent } = await import('./spawnAgent');
+    await spawnAgent({
+      agentType: 'opencode',
+      extraArgs: ['--model', 'openai/gpt-5'],
+      operationId: 'op-open',
+      prompt: [
+        { text: 'continue', type: 'text' },
+        { source: { path: imagePath, type: 'path' }, type: 'image' },
+      ],
+      resumeSessionId: 'ses_previous',
+    });
+
+    expect(spawnCalls[0].args).toEqual([
+      'run',
+      '--format',
+      'json',
+      '--thinking',
+      '--auto',
+      '--session',
+      'ses_previous',
+      '--file',
+      imagePath,
+      '--model',
+      'openai/gpt-5',
+    ]);
+  });
+
   it('seeds a real Codex resumed stream with the previous cumulative usage from the session file', async () => {
     const threadId = '019dba1e-eec2-7a22-bdfb-ac6175e03081';
     const realCodexFixture = await readFile(
@@ -258,7 +350,7 @@ describe('spawnAgent', () => {
       path.join(sessionDir, `rollout-2026-06-11T01-31-27-${threadId}.jsonl`),
       JSON.stringify({
         type: 'turn.completed',
-        usage: { cached_input_tokens: 42_000, input_tokens: 52_000, output_tokens: 300 },
+        usage: { cached_input_tokens: 42_000, input_tokens: 51_000, output_tokens: 300 },
       }),
     );
 
@@ -289,10 +381,10 @@ describe('spawnAgent', () => {
         phase: 'turn_metadata',
         usage: {
           inputCachedTokens: 1008,
-          inputCacheMissTokens: 937,
-          totalInputTokens: 1945,
+          inputCacheMissTokens: 929,
+          totalInputTokens: 1937,
           totalOutputTokens: 116,
-          totalTokens: 2061,
+          totalTokens: 2053,
         },
       },
       type: 'step_complete',
@@ -566,6 +658,31 @@ describe('spawnAgent', () => {
         // drain
       }
     }).rejects.toThrow(/boom/);
+  });
+
+  it('events iterator surfaces child spawn errors instead of hanging', async () => {
+    const fake = createFakeProc();
+    nextFakeProc = fake.proc;
+
+    const { spawnAgent } = await import('./spawnAgent');
+    const handle = await spawnAgent({
+      agentType: 'claude-code',
+      operationId: 'op-1',
+      prompt: 'go',
+    });
+    const exitError = handle.exit.catch((err) => err);
+
+    const drainEvents = async () => {
+      for await (const _e of handle.events) {
+        // drain
+      }
+    };
+
+    const spawnError = new Error('spawn claude ENOENT');
+    fake.proc.emit('error', spawnError);
+
+    await expect(drainEvents()).rejects.toThrow(/spawn claude ENOENT/);
+    await expect(exitError).resolves.toBe(spawnError);
   });
 
   it('tees the child raw stdout to onRawStdout verbatim, before adapting', async () => {

@@ -1,10 +1,10 @@
 import { gptImage1Schema, gptImage2Schema } from '../const/imageParameters';
 import type {
+  AIASRModelCard,
   AIChatModelCard,
   AIEmbeddingModelCard,
   AIImageModelCard,
   AIRealtimeModelCard,
-  AISTTModelCard,
   AITTSModelCard,
   AIVideoModelCard,
 } from '../types/aiModel';
@@ -45,7 +45,203 @@ export const openaiChatModels: AIChatModelCard[] = [
       vision: true,
     },
     contextWindowTokens: 1_050_000,
-    description: 'GPT-5.5 is our newest frontier model for the most complex professional work.',
+    description:
+      "GPT-5.6 Sol is OpenAI's latest flagship and most capable model, the top choice in the GPT family for coding and agentic work.",
+    displayName: 'GPT-5.6 Sol',
+    enabled: true,
+    family: 'gpt',
+    generation: 'gpt-5.6',
+    id: 'gpt-5.6-sol',
+    knowledgeCutoff: '2026-02',
+    maxOutput: 128_000,
+    pricing: {
+      units: [
+        {
+          name: 'textInput',
+          strategy: 'tiered',
+          tiers: [
+            { rate: 5, upTo: 272_000 },
+            { rate: 10, upTo: 'infinity' },
+          ],
+          unit: 'millionTokens',
+        },
+        {
+          name: 'textInput_cacheRead',
+          strategy: 'tiered',
+          tiers: [
+            { rate: 0.5, upTo: 272_000 },
+            { rate: 1, upTo: 'infinity' },
+          ],
+          unit: 'millionTokens',
+        },
+        {
+          name: 'textInput_cacheWrite',
+          strategy: 'tiered',
+          tiers: [
+            { rate: 6.25, upTo: 272_000 },
+            { rate: 12.5, upTo: 'infinity' },
+          ],
+          unit: 'millionTokens',
+        },
+        {
+          name: 'textOutput',
+          strategy: 'tiered',
+          tiers: [
+            { rate: 30, upTo: 272_000 },
+            { rate: 45, upTo: 'infinity' },
+          ],
+          unit: 'millionTokens',
+        },
+      ],
+    },
+    releasedAt: '2026-07-09',
+    settings: {
+      extendParams: ['reasoningMode', 'gpt5_6ReasoningEffort', 'textVerbosity'],
+      searchImpl: 'params',
+    },
+    type: 'chat',
+  },
+  {
+    abilities: {
+      functionCall: true,
+      reasoning: true,
+      search: true,
+      structuredOutput: true,
+      vision: true,
+    },
+    contextWindowTokens: 1_050_000,
+    description:
+      'GPT-5.6 Terra balances intelligence and cost for everyday professional work, competitive with GPT-5.5 at about half the price.',
+    displayName: 'GPT-5.6 Terra',
+    enabled: true,
+    family: 'gpt',
+    generation: 'gpt-5.6',
+    id: 'gpt-5.6-terra',
+    knowledgeCutoff: '2026-02',
+    maxOutput: 128_000,
+    pricing: {
+      units: [
+        {
+          name: 'textInput',
+          strategy: 'tiered',
+          tiers: [
+            { rate: 2.5, upTo: 272_000 },
+            { rate: 5, upTo: 'infinity' },
+          ],
+          unit: 'millionTokens',
+        },
+        {
+          name: 'textInput_cacheRead',
+          strategy: 'tiered',
+          tiers: [
+            { rate: 0.25, upTo: 272_000 },
+            { rate: 0.5, upTo: 'infinity' },
+          ],
+          unit: 'millionTokens',
+        },
+        {
+          name: 'textInput_cacheWrite',
+          strategy: 'tiered',
+          tiers: [
+            { rate: 3.125, upTo: 272_000 },
+            { rate: 6.25, upTo: 'infinity' },
+          ],
+          unit: 'millionTokens',
+        },
+        {
+          name: 'textOutput',
+          strategy: 'tiered',
+          tiers: [
+            { rate: 15, upTo: 272_000 },
+            { rate: 22.5, upTo: 'infinity' },
+          ],
+          unit: 'millionTokens',
+        },
+      ],
+    },
+    releasedAt: '2026-07-09',
+    settings: {
+      extendParams: ['reasoningMode', 'gpt5_6ReasoningEffort', 'textVerbosity'],
+      searchImpl: 'params',
+    },
+    type: 'chat',
+  },
+  {
+    abilities: {
+      functionCall: true,
+      reasoning: true,
+      search: true,
+      structuredOutput: true,
+      vision: true,
+    },
+    contextWindowTokens: 1_050_000,
+    description:
+      'GPT-5.6 Luna is optimized for cost-sensitive, high-volume workloads with the lowest price in the GPT-5.6 family.',
+    displayName: 'GPT-5.6 Luna',
+    enabled: true,
+    family: 'gpt',
+    generation: 'gpt-5.6',
+    id: 'gpt-5.6-luna',
+    knowledgeCutoff: '2026-02',
+    maxOutput: 128_000,
+    pricing: {
+      units: [
+        {
+          name: 'textInput',
+          strategy: 'tiered',
+          tiers: [
+            { rate: 1, upTo: 272_000 },
+            { rate: 2, upTo: 'infinity' },
+          ],
+          unit: 'millionTokens',
+        },
+        {
+          name: 'textInput_cacheRead',
+          strategy: 'tiered',
+          tiers: [
+            { rate: 0.1, upTo: 272_000 },
+            { rate: 0.2, upTo: 'infinity' },
+          ],
+          unit: 'millionTokens',
+        },
+        {
+          name: 'textInput_cacheWrite',
+          strategy: 'tiered',
+          tiers: [
+            { rate: 1.25, upTo: 272_000 },
+            { rate: 2.5, upTo: 'infinity' },
+          ],
+          unit: 'millionTokens',
+        },
+        {
+          name: 'textOutput',
+          strategy: 'tiered',
+          tiers: [
+            { rate: 6, upTo: 272_000 },
+            { rate: 9, upTo: 'infinity' },
+          ],
+          unit: 'millionTokens',
+        },
+      ],
+    },
+    releasedAt: '2026-07-09',
+    settings: {
+      extendParams: ['reasoningMode', 'gpt5_6ReasoningEffort', 'textVerbosity'],
+      searchImpl: 'params',
+    },
+    type: 'chat',
+  },
+  {
+    abilities: {
+      functionCall: true,
+      reasoning: true,
+      search: true,
+      structuredOutput: true,
+      vision: true,
+    },
+    contextWindowTokens: 1_050_000,
+    description:
+      "GPT-5.5 is OpenAI's previous-generation frontier model for complex professional work.",
     displayName: 'GPT-5.5',
     enabled: true,
     family: 'gpt',
@@ -56,39 +252,30 @@ export const openaiChatModels: AIChatModelCard[] = [
     pricing: {
       units: [
         {
-          lookup: {
-            prices: {
-              '[0, 0.272]': 5,
-              '[0.272, infinity]': 10,
-            },
-            pricingParams: ['textInput'],
-          },
           name: 'textInput',
-          strategy: 'lookup',
+          strategy: 'tiered',
+          tiers: [
+            { rate: 5, upTo: 272_000 },
+            { rate: 10, upTo: 'infinity' },
+          ],
           unit: 'millionTokens',
         },
         {
-          lookup: {
-            prices: {
-              '[0, 0.272]': 0.5,
-              '[0.272, infinity]': 1,
-            },
-            pricingParams: ['textInput'],
-          },
           name: 'textInput_cacheRead',
-          strategy: 'lookup',
+          strategy: 'tiered',
+          tiers: [
+            { rate: 0.5, upTo: 272_000 },
+            { rate: 1, upTo: 'infinity' },
+          ],
           unit: 'millionTokens',
         },
         {
-          lookup: {
-            prices: {
-              '[0, 0.272]': 30,
-              '[0.272, infinity]': 45,
-            },
-            pricingParams: ['textInput'],
-          },
           name: 'textOutput',
-          strategy: 'lookup',
+          strategy: 'tiered',
+          tiers: [
+            { rate: 30, upTo: 272_000 },
+            { rate: 45, upTo: 'infinity' },
+          ],
           unit: 'millionTokens',
         },
       ],
@@ -161,39 +348,30 @@ export const openaiChatModels: AIChatModelCard[] = [
     pricing: {
       units: [
         {
-          lookup: {
-            prices: {
-              '[0, 0.272]': 2.5,
-              '[0.272, infinity]': 5,
-            },
-            pricingParams: ['textInput'],
-          },
           name: 'textInput',
-          strategy: 'lookup',
+          strategy: 'tiered',
+          tiers: [
+            { rate: 2.5, upTo: 272_000 },
+            { rate: 5, upTo: 'infinity' },
+          ],
           unit: 'millionTokens',
         },
         {
-          lookup: {
-            prices: {
-              '[0, 0.272]': 0.25,
-              '[0.272, infinity]': 0.5,
-            },
-            pricingParams: ['textInput'],
-          },
           name: 'textInput_cacheRead',
-          strategy: 'lookup',
+          strategy: 'tiered',
+          tiers: [
+            { rate: 0.25, upTo: 272_000 },
+            { rate: 0.5, upTo: 'infinity' },
+          ],
           unit: 'millionTokens',
         },
         {
-          lookup: {
-            prices: {
-              '[0, 0.272]': 15,
-              '[0.272, infinity]': 22.5,
-            },
-            pricingParams: ['textInput'],
-          },
           name: 'textOutput',
-          strategy: 'lookup',
+          strategy: 'tiered',
+          tiers: [
+            { rate: 15, upTo: 272_000 },
+            { rate: 22.5, upTo: 'infinity' },
+          ],
           unit: 'millionTokens',
         },
       ],
@@ -224,27 +402,21 @@ export const openaiChatModels: AIChatModelCard[] = [
     pricing: {
       units: [
         {
-          lookup: {
-            prices: {
-              '[0, 0.272]': 30,
-              '[0.272, infinity]': 60,
-            },
-            pricingParams: ['textInput'],
-          },
           name: 'textInput',
-          strategy: 'lookup',
+          strategy: 'tiered',
+          tiers: [
+            { rate: 30, upTo: 272_000 },
+            { rate: 60, upTo: 'infinity' },
+          ],
           unit: 'millionTokens',
         },
         {
-          lookup: {
-            prices: {
-              '[0, 0.272]': 180,
-              '[0.272, infinity]': 270,
-            },
-            pricingParams: ['textInput'],
-          },
           name: 'textOutput',
-          strategy: 'lookup',
+          strategy: 'tiered',
+          tiers: [
+            { rate: 180, upTo: 272_000 },
+            { rate: 270, upTo: 'infinity' },
+          ],
           unit: 'millionTokens',
         },
       ],
@@ -1555,7 +1727,7 @@ export const openaiTTSModels: AITTSModelCard[] = [
 ];
 
 // Speech recognition models
-export const openaiSTTModels: AISTTModelCard[] = [
+export const openaiASRModels: AIASRModelCard[] = [
   {
     description:
       'A general speech recognition model supporting multilingual ASR, speech translation, and language identification.',
@@ -1571,7 +1743,7 @@ export const openaiSTTModels: AISTTModelCard[] = [
         },
       ],
     },
-    type: 'stt',
+    type: 'asr',
   },
   {
     contextWindowTokens: 16_000,
@@ -1587,7 +1759,7 @@ export const openaiSTTModels: AISTTModelCard[] = [
         { name: 'textOutput', rate: 10, strategy: 'fixed', unit: 'millionTokens' },
       ],
     },
-    type: 'stt',
+    type: 'asr',
   },
   {
     contextWindowTokens: 16_000,
@@ -1603,7 +1775,7 @@ export const openaiSTTModels: AISTTModelCard[] = [
         { name: 'textOutput', rate: 5, strategy: 'fixed', unit: 'millionTokens' },
       ],
     },
-    type: 'stt',
+    type: 'asr',
   },
 ];
 
@@ -1850,7 +2022,7 @@ export const allModels = [
   ...openaiChatModels,
   ...openaiEmbeddingModels,
   ...openaiTTSModels,
-  ...openaiSTTModels,
+  ...openaiASRModels,
   ...openaiImageModels,
   ...openaiRealtimeModels,
   ...openaiVideoModels,

@@ -2,7 +2,7 @@
 
 import { DEFAULT_BLOCK_ANCHOR_PADDING, EditorProvider } from '@lobehub/editor/react';
 import { Flexbox } from '@lobehub/ui';
-import { createStyles, cssVar } from 'antd-style';
+import { createStaticStyles, cssVar } from 'antd-style';
 import type { CSSProperties, FC, ReactNode, UIEvent } from 'react';
 import { memo, useCallback, useEffect, useRef } from 'react';
 
@@ -17,9 +17,10 @@ import { systemStatusSelectors } from '@/store/global/selectors';
 import { usePageStore } from '@/store/page';
 import { StyleSheet } from '@/utils/styles';
 
-import EditingIndicator from './EditingIndicator';
 import EditorCanvas from './EditorCanvas';
 import Header from './Header';
+import LockedAlert from './LockedAlert';
+import LockStatusBanner from './LockStatusBanner';
 import { PageAgentProvider } from './PageAgentProvider';
 import { PageEditorProvider } from './PageEditorProvider';
 import RightPanel from './RightPanel';
@@ -80,7 +81,7 @@ const styles = StyleSheet.create({
   },
 });
 
-const useTableOverrideStyles = createStyles(({ css }) => ({
+const overrideStyles = createStaticStyles(({ css }) => ({
   editorContent: css`
     .lobe-editor-table-scroll-wrapper.lobe-editor-table-scroll-wrapper {
       --lobe-block-anchor-padding: var(--lobe-pageeditor-table-bleed-inline);
@@ -107,6 +108,12 @@ interface PageEditorProps {
   fullWidthHeader?: boolean;
   header?: PageEditorHeader;
   knowledgeBaseId?: string;
+  /**
+   * Make the page title/emoji read-only while keeping the body editable. Set for
+   * managed docs whose identity lives elsewhere (e.g. a skill's `SKILL.md`
+   * index — see {@link PublicState.metaReadOnly}).
+   */
+  metaReadOnly?: boolean;
   onBack?: () => void;
   onDelete?: () => void;
   onDocumentIdChange?: (newId: string) => void;
@@ -114,20 +121,34 @@ interface PageEditorProps {
   onSave?: () => void;
   onTitleChange?: (title: string) => void;
   pageId?: string;
+  /**
+   * Render the built-in right panel (page copilot / history). Defaults to true.
+   * Set false when an outer layout supplies its own right panel (e.g. the
+   * agent-document route keeps the agent working sidebar instead).
+   */
+  rightPanel?: boolean;
+  /**
+   * Whether PageEditor should sync its page-copilot agent into the global
+   * agent/chat stores. Defaults to true for normal Pages. Set false when the
+   * editor is embedded under an existing agent layout that must preserve its
+   * own active agent and topic state.
+   */
+  syncPageAgentActiveState?: boolean;
   title?: string;
 }
 
 interface PageEditorCanvasProps {
   fullWidthHeader?: boolean;
   header?: PageEditorHeader;
+  rightPanel?: boolean;
 }
 
-const PageEditorCanvas = memo<PageEditorCanvasProps>(({ header, fullWidthHeader }) => {
+const PageEditorCanvas = memo<PageEditorCanvasProps>(({ header, fullWidthHeader, rightPanel }) => {
+  const showRightPanel = rightPanel !== false;
   const editable = usePageEditable();
   const editor = usePageEditorStore((s) => s.editor);
   const documentId = usePageEditorStore((s) => s.documentId);
   const wideScreen = useGlobalStore(systemStatusSelectors.wideScreen);
-  const { styles: overrideStyles } = useTableOverrideStyles();
   const tableBleedInline = wideScreen
     ? `${TABLE_BASE_BLEED}px`
     : `calc(${TABLE_BASE_BLEED}px + max((100cqi - ${CONVERSATION_MIN_WIDTH}px) / 2, 0px))`;
@@ -282,8 +303,12 @@ const PageEditorCanvas = memo<PageEditorCanvasProps>(({ header, fullWidthHeader 
           <Flexbox className={overrideStyles.editorContent} flex={1} style={editorContentStyle}>
             <TitleSection />
             <PageMetaBar />
-            {/* Body-only lock indicator: title/avatar above stay editable. */}
-            <EditingIndicator />
+            {/* Surfaces local heartbeat health (unstable/lost) for the holder.
+                Suppressed when LockedAlert is showing — see LockStatusBanner. */}
+            <LockStatusBanner />
+            {/* Prominent in-body notice when another member holds the lock; the
+                compact status badge lives in the Header (EditingIndicator). */}
+            <LockedAlert />
             <EditorCanvas />
           </Flexbox>
         </WideScreenContainer>
@@ -298,7 +323,7 @@ const PageEditorCanvas = memo<PageEditorCanvasProps>(({ header, fullWidthHeader 
         {headerSlot}
         <Flexbox horizontal flex={1} style={{ minHeight: 0 }} width={'100%'}>
           {editorPane}
-          <RightPanel />
+          {showRightPanel && <RightPanel />}
         </Flexbox>
       </Flexbox>
     );
@@ -312,7 +337,7 @@ const PageEditorCanvas = memo<PageEditorCanvasProps>(({ header, fullWidthHeader 
       width={'100%'}
     >
       {editorPane}
-      <RightPanel />
+      {showRightPanel && <RightPanel />}
     </Flexbox>
   );
 });
@@ -327,6 +352,7 @@ export const PageEditor: FC<PageEditorProps> = ({
   header,
   fullWidthHeader,
   knowledgeBaseId,
+  metaReadOnly,
   onDocumentIdChange,
   onEmojiChange,
   onSave,
@@ -334,16 +360,19 @@ export const PageEditor: FC<PageEditorProps> = ({
   onBack,
   title,
   emoji,
+  rightPanel,
+  syncPageAgentActiveState,
 }) => {
   const { allowed: canEdit } = usePermission('edit_own_content');
   const deletePage = usePageStore((s) => s.deletePage);
 
   return (
-    <PageAgentProvider>
+    <PageAgentProvider pageId={pageId} syncActiveAgent={syncPageAgentActiveState}>
       <EditorProvider>
         <PageEditorProvider
           emoji={emoji}
           knowledgeBaseId={knowledgeBaseId}
+          metaReadOnly={metaReadOnly}
           pageId={pageId}
           title={title}
           onBack={onBack}
@@ -369,7 +398,11 @@ export const PageEditor: FC<PageEditorProps> = ({
             onTitleChange?.(nextTitle);
           }}
         >
-          <PageEditorCanvas fullWidthHeader={fullWidthHeader} header={header} />
+          <PageEditorCanvas
+            fullWidthHeader={fullWidthHeader}
+            header={header}
+            rightPanel={rightPanel}
+          />
         </PageEditorProvider>
       </EditorProvider>
     </PageAgentProvider>

@@ -18,7 +18,7 @@ import { discoverService } from '@/services/discover';
 import { getAgentStoreState, useAgentStore } from '@/store/agent';
 import { agentSelectors } from '@/store/agent/selectors';
 import { useChatStore } from '@/store/chat';
-import { dispatchNonHeteroSubAgent } from '@/store/chat/slices/aiChat/actions/nonHeteroSubAgentDispatcher';
+import { dispatchNonHeteroSubAgent } from '@/store/chat/slices/agentRun/actions/dispatch/nonHeteroSubAgentDispatcher';
 import { dbMessageSelectors } from '@/store/chat/slices/message/selectors';
 import { messageMapKey } from '@/store/chat/utils/messageMapKey';
 
@@ -141,7 +141,7 @@ class AgentManagementExecutor extends BaseExecutor<typeof AgentManagementApiName
         }
       }
 
-      // Return special state recognized by AgentRuntime's legacy exec_sub_agent executor.
+      // Return special state recognized by AgentRuntime's exec_sub_agent executor.
       // callAgent keeps this alias until it is redesigned as an explicit agent invocation.
       return {
         content: `🚀 Triggered async task to call agent "${agentId}"${taskTitle ? `: ${taskTitle}` : ''}`,

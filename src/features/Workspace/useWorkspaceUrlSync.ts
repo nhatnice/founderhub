@@ -1,12 +1,13 @@
 'use client';
 
 import { useLayoutEffect } from 'react';
-import { useLocation } from 'react-router-dom';
 
 import { useActiveWorkspaceId } from '@/business/client/hooks/useActiveWorkspaceId';
 import { useIsWorkspaceLoading } from '@/business/client/hooks/useIsWorkspaceLoading';
-import { useSwitchWorkspace } from '@/business/client/hooks/useSwitchWorkspace';
+import { useSilentSwitchWorkspace } from '@/business/client/hooks/useSwitchWorkspace';
 import { useWorkspaces } from '@/business/client/hooks/useWorkspaces';
+
+import { useWorkspaceSyncPathname } from './useWorkspaceSyncPathname';
 
 /**
  * Top-level route segments that share the namespace with `:workspaceSlug`.
@@ -69,11 +70,14 @@ export const isWorkspaceSlugCandidatePath = (pathname: string): boolean => {
  *   `WorkspaceSlugBoundary` can render its 404
  */
 export const useWorkspaceUrlSync = (): void => {
-  const { pathname } = useLocation();
+  const pathname = useWorkspaceSyncPathname();
   const workspaces = useWorkspaces();
   const activeId = useActiveWorkspaceId();
   const isLoading = useIsWorkspaceLoading();
-  const { switchWorkspace, switchToPersonal } = useSwitchWorkspace();
+  // URL is a passive source, not an explicit user intent — use the silent
+  // variant so refreshing or following a `/{slug}` link is not treated as
+  // a user-driven switch.
+  const { switchWorkspace, switchToPersonal } = useSilentSwitchWorkspace();
 
   // `useLayoutEffect` (not `useEffect`) so the workspace switch is scheduled
   // before the browser paints. With `useEffect` there is one paintable frame

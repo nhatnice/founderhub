@@ -1,7 +1,8 @@
 import { MessageSquare } from 'lucide-react';
-import { type RouteObject } from 'react-router-dom';
+import { type RouteObject } from 'react-router';
 import { describe, expect, it } from 'vitest';
 
+import { mergeSearchParams } from '@/features/RouteMeta/params';
 import { type RouteMeta } from '@/spa/router/routeMeta';
 
 import {
@@ -11,7 +12,11 @@ import {
   pickMeaningful,
 } from './resolveRouteMeta';
 
-const agentMeta: RouteMeta = { icon: MessageSquare, titleKey: 'navigation.chat' };
+const agentMeta: RouteMeta = {
+  icon: MessageSquare,
+  tabTitleKey: 'navigation.newChat',
+  titleKey: 'navigation.chat',
+};
 
 const fixtureRoutes: RouteObject[] = [
   {
@@ -24,6 +29,7 @@ describe('matchRouteMeta', () => {
   it('returns the deepest static meta for a matched route', () => {
     const result = matchRouteMeta(fixtureRoutes, '/agent/abc');
     expect(result.static.icon).toBe(MessageSquare);
+    expect(result.static.tabTitleKey).toBe('navigation.newChat');
     expect(result.static.titleKey).toBe('navigation.chat');
     expect(result.params.aid).toBe('abc');
     expect(result.meta).toBe(agentMeta);
@@ -39,6 +45,21 @@ describe('matchRouteMeta', () => {
   it('returns empty static meta when no route matches', () => {
     const result = matchRouteMeta(fixtureRoutes, '/nonexistent/path');
     expect(result.static).toEqual({});
+  });
+
+  it('merges search params into route params', () => {
+    const result = matchRouteMeta(fixtureRoutes, '/agent/abc?topic=tpc_1');
+    expect(result.params.aid).toBe('abc');
+    expect(result.params.topic).toBe('tpc_1');
+  });
+});
+
+describe('mergeSearchParams', () => {
+  it('keeps path params when search params use the same key', () => {
+    expect(mergeSearchParams({ aid: 'path-agent' }, '?aid=query-agent&topic=t1')).toEqual({
+      aid: 'path-agent',
+      topic: 't1',
+    });
   });
 });
 

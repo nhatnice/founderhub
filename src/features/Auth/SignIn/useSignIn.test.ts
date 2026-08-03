@@ -12,6 +12,11 @@ const mockSignInOauth2 = vi.hoisted(() => vi.fn());
 const mockSignInEmail = vi.hoisted(() => vi.fn());
 const mockSignInMagicLink = vi.hoisted(() => vi.fn());
 const mockRequestPasswordReset = vi.hoisted(() => vi.fn());
+const mockBusinessSignin = vi.hoisted(() => ({
+  getAdditionalData: vi.fn(async () => ({})),
+  preSocialSigninCheck: vi.fn(async () => true),
+  ssoProviders: [] as string[],
+}));
 const mockLocalStorage = vi.hoisted(() => {
   const store = new Map<string, string>();
 
@@ -23,7 +28,7 @@ const mockLocalStorage = vi.hoisted(() => {
   };
 });
 
-vi.mock('react-router-dom', () => ({
+vi.mock('react-router', () => ({
   useNavigate: () => mockNavigate,
   useSearchParams: () => [{ get: mockSearchParamsGet }],
 }));
@@ -49,23 +54,25 @@ vi.mock('@/libs/better-auth/utils/client', () => ({
 
 vi.mock('@lobechat/business-const', () => ({
   BRANDING_NAME: 'LobeHub',
-  ENABLE_BUSINESS_FEATURES: false,
 }));
 
 vi.mock('@/business/client/hooks/useBusinessSignin', () => ({
   useBusinessSignin: () => ({
-    getAdditionalData: async () => ({}),
-    preSocialSigninCheck: async () => true,
-    ssoProviders: [],
+    getAdditionalData: mockBusinessSignin.getAdditionalData,
+    preSocialSigninCheck: mockBusinessSignin.preSocialSigninCheck,
+    ssoProviders: mockBusinessSignin.ssoProviders,
   }),
 }));
 
+let mockEnableBusinessFeatures = false;
+let mockEnableMagicLink = false;
 vi.mock('@/features/AuthShell', () => ({
   useAuthServerConfigStore: (selector: (s: any) => any) =>
     selector({
       serverConfig: {
         disableEmailPassword: false,
-        enableMagicLink: false,
+        enableBusinessFeatures: mockEnableBusinessFeatures,
+        enableMagicLink: mockEnableMagicLink,
         oAuthSSOProviders: ['google', 'github'],
       },
       serverConfigInit: true,
@@ -75,6 +82,8 @@ vi.mock('@/features/AuthShell', () => ({
 const mockSetFieldValue = vi.fn();
 const mockGetFieldValue = vi.fn();
 const mockValidateFields = vi.fn();
+const mockSetFields = vi.fn();
+const mockResetFields = vi.fn();
 const mockSubmit = vi.fn();
 vi.mock('antd', async () => {
   const actual: any = await vi.importActual('antd');
@@ -85,6 +94,8 @@ vi.mock('antd', async () => {
       useForm: () => [
         {
           getFieldValue: mockGetFieldValue,
+          resetFields: mockResetFields,
+          setFields: mockSetFields,
           setFieldValue: mockSetFieldValue,
           submit: mockSubmit,
           validateFields: mockValidateFields,
@@ -105,6 +116,11 @@ describe('useSignIn', () => {
     vi.clearAllMocks();
     mockLocalStorage.clear();
     mockSearchParamsGet.mockReturnValue(null);
+    mockEnableBusinessFeatures = false;
+    mockEnableMagicLink = false;
+    mockBusinessSignin.ssoProviders = [];
+    mockBusinessSignin.getAdditionalData.mockResolvedValue({});
+    mockBusinessSignin.preSocialSigninCheck.mockResolvedValue(true);
     Object.defineProperty(window, 'location', {
       configurable: true,
       value: { ...originalLocation, href: '' },
@@ -282,7 +298,7 @@ describe('useSignIn', () => {
       },
     );
 
-    it('should show error on sign in failure', async () => {
+    it('should surface sign in failure as an inline password error', async () => {
       mockSignInEmail.mockResolvedValue({
         error: { message: 'Invalid credentials', status: 401 },
       });
@@ -302,7 +318,11 @@ describe('useSignIn', () => {
         await result.current.handleSignIn({ password: 'wrong' });
       });
 
-      expect(mockMessageError).toHaveBeenCalledWith('Invalid credentials');
+      // Error is pinned inline on the password field, not shown as a toast
+      expect(mockSetFields).toHaveBeenCalledWith([
+        { errors: ['Invalid credentials'], name: 'password' },
+      ]);
+      expect(mockMessageError).not.toHaveBeenCalled();
     });
 
     it('should redirect to verify-email on 403', async () => {
@@ -419,6 +439,20 @@ describe('useSignIn', () => {
 
       expect(localStorage.getItem('lobehub:auth:last-provider:v1')).toBe('google');
     });
+
+    it('should stop social sign in when business pre-check rejects', async () => {
+      mockEnableBusinessFeatures = true;
+      mockBusinessSignin.preSocialSigninCheck.mockResolvedValue(false);
+
+      const { result } = renderHook(() => useSignIn());
+
+      await act(async () => {
+        await result.current.handleSocialSignIn('google');
+      });
+
+      expect(mockBusinessSignin.preSocialSigninCheck).toHaveBeenCalled();
+      expect(mockSignInSocial).not.toHaveBeenCalled();
+    });
   });
 
   describe('handleBackToEmail', () => {
@@ -443,11 +477,14 @@ describe('useSignIn', () => {
       expect(result.current.step).toBe('email');
       expect(result.current.email).toBe('');
       expect(result.current.isSocialOnly).toBe(false);
+      // The shared form's password (+ any inline error) must be cleared so the
+      // next email doesn't remount pre-filled with the previous account's value.
+      expect(mockResetFields).toHaveBeenCalledWith(['password']);
     });
   });
 
   describe('handleForgotPassword', () => {
-    it('should call requestPasswordReset and show success', async () => {
+    it('should call requestPasswordReset and land on the email-sent state', async () => {
       mockRequestPasswordReset.mockResolvedValue(undefined);
 
       mockFetch.mockResolvedValueOnce({
@@ -469,19 +506,128 @@ describe('useSignIn', () => {
       expect(mockRequestPasswordReset).toHaveBeenCalledWith(
         expect.objectContaining({ email: 'user@example.com' }),
       );
-      expect(mockMessageSuccess).toHaveBeenCalled();
+      // Success is a persistent landing state, not a fleeting toast
+      expect(result.current.step).toBe('emailSent');
+      expect(result.current.sentInfo).toEqual(
+        expect.objectContaining({ email: 'user@example.com', type: 'resetPassword' }),
+      );
     });
 
-    it('should show error on failure', async () => {
-      mockRequestPasswordReset.mockRejectedValue(new Error('fail'));
-
+    it('should no-op when no email has been resolved yet', async () => {
       const { result } = renderHook(() => useSignIn());
 
       await act(async () => {
         await result.current.handleForgotPassword();
       });
 
+      expect(mockRequestPasswordReset).not.toHaveBeenCalled();
+      expect(result.current.step).toBe('email');
+    });
+
+    it('should show error on failure', async () => {
+      mockRequestPasswordReset.mockRejectedValue(new Error('fail'));
+
+      mockFetch.mockResolvedValueOnce({
+        json: async () => ({ exists: true, hasPassword: true }),
+        ok: true,
+      });
+
+      const { result } = renderHook(() => useSignIn());
+
+      await act(async () => {
+        await result.current.handleCheckUser({ email: 'user@example.com' });
+      });
+
+      await act(async () => {
+        await result.current.handleForgotPassword();
+      });
+
       expect(mockMessageError).toHaveBeenCalled();
+      expect(result.current.step).toBe('password');
+    });
+  });
+
+  describe('magic link', () => {
+    it('should land on email-sent state when a passwordless user triggers magic link', async () => {
+      mockEnableMagicLink = true;
+      mockSignInMagicLink.mockResolvedValue({ error: null });
+      mockFetch.mockResolvedValueOnce({
+        json: async () => ({ exists: true, hasPassword: false }),
+        ok: true,
+      });
+
+      const { result } = renderHook(() => useSignIn());
+
+      await act(async () => {
+        await result.current.handleCheckUser({ email: 'user@example.com' });
+      });
+
+      expect(mockSignInMagicLink).toHaveBeenCalledTimes(1);
+      expect(result.current.step).toBe('emailSent');
+      expect(result.current.sentInfo).toEqual(
+        expect.objectContaining({ email: 'user@example.com', type: 'magicLink' }),
+      );
+    });
+  });
+
+  describe('handleResendEmail', () => {
+    it('should resend the password reset email and confirm', async () => {
+      mockRequestPasswordReset.mockResolvedValue(undefined);
+      mockFetch.mockResolvedValueOnce({
+        json: async () => ({ exists: true, hasPassword: true }),
+        ok: true,
+      });
+
+      const { result } = renderHook(() => useSignIn());
+
+      await act(async () => {
+        await result.current.handleCheckUser({ email: 'user@example.com' });
+      });
+      await act(async () => {
+        await result.current.handleForgotPassword();
+      });
+
+      mockRequestPasswordReset.mockClear();
+
+      await act(async () => {
+        await result.current.handleResendEmail();
+      });
+
+      expect(mockRequestPasswordReset).toHaveBeenCalledTimes(1);
+      expect(mockMessageSuccess).toHaveBeenCalled();
+      expect(result.current.step).toBe('emailSent');
+    });
+  });
+
+  describe('handleBackFromSent', () => {
+    it('should return to the email entry (not the password step) after a reset email', async () => {
+      mockRequestPasswordReset.mockResolvedValue(undefined);
+      mockFetch.mockResolvedValueOnce({
+        json: async () => ({ exists: true, hasPassword: true }),
+        ok: true,
+      });
+
+      const { result } = renderHook(() => useSignIn());
+
+      await act(async () => {
+        await result.current.handleCheckUser({ email: 'user@example.com' });
+      });
+      await act(async () => {
+        await result.current.handleForgotPassword();
+      });
+
+      expect(result.current.step).toBe('emailSent');
+
+      act(() => {
+        result.current.handleBackFromSent();
+      });
+
+      // "Use a different email" must land on the email entry so the label
+      // matches the action, and reset the shared password field.
+      expect(result.current.step).toBe('email');
+      expect(result.current.email).toBe('');
+      expect(result.current.sentInfo).toBeNull();
+      expect(mockResetFields).toHaveBeenCalledWith(['password']);
     });
   });
 
@@ -494,6 +640,15 @@ describe('useSignIn', () => {
       expect(result.current.oAuthSSOProviders[0]).toBe('github');
 
       localStorage.removeItem('lobehub:auth:last-provider:v1');
+    });
+
+    it('should use business SSO providers when business features are enabled by server config', () => {
+      mockEnableBusinessFeatures = true;
+      mockBusinessSignin.ssoProviders = ['saml'];
+
+      const { result } = renderHook(() => useSignIn());
+
+      expect(result.current.oAuthSSOProviders).toEqual(['saml']);
     });
   });
 });

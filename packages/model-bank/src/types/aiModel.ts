@@ -16,7 +16,7 @@ export const AiModelTypeSchema = z.enum([
   'chat',
   'embedding',
   'tts',
-  'stt',
+  'asr',
   'image',
   'video',
   'text2music',
@@ -25,7 +25,20 @@ export const AiModelTypeSchema = z.enum([
 
 export type AiModelType = z.infer<typeof AiModelTypeSchema>;
 
+/**
+ * The speech-to-text model type was renamed from the legacy `stt` to the
+ * standard `asr`. Instead of a bulk DB data migration, persisted rows and
+ * external API inputs are normalized at the read/write boundary — only data
+ * that is actually touched gets converted, old untouched rows stay valid.
+ */
+export const normalizeAiModelType = <T extends string | null | undefined>(type: T): T =>
+  (type === 'stt' ? 'asr' : type) as T;
+
 export interface ModelAbilities {
+  /**
+   * whether model supports audio input understanding
+   */
+  audio?: boolean;
   /**
    * whether model supports file upload
    */
@@ -61,6 +74,7 @@ export interface ModelAbilities {
 }
 
 const AiModelAbilitiesSchema = z.object({
+  audio: z.boolean().optional(),
   // files: z.boolean().optional(),
   functionCall: z.boolean().optional(),
   imageOutput: z.boolean().optional(),
@@ -178,6 +192,10 @@ export interface FixedPricingUnit extends PricingUnitBase {
 export interface TieredPricingUnit extends PricingUnitBase {
   strategy: 'tiered';
   tiers: Array<{
+    /**
+     * Original display price before discounts. Billing and cost calculation use `rate`.
+     */
+    originalRate?: number;
     rate: number;
     upTo: number | 'infinity';
   }>;
@@ -185,6 +203,10 @@ export interface TieredPricingUnit extends PricingUnitBase {
 
 export interface LookupPricingUnit extends PricingUnitBase {
   lookup: {
+    /**
+     * Original display prices before discounts. Billing and cost calculation use `prices`.
+     */
+    originalPrices?: Record<string, number>;
     prices: Record<string, number>;
     pricingParams: string[];
   };
@@ -204,6 +226,44 @@ export interface Pricing {
   approximatePricePerVideo?: number;
   currency?: ModelPriceCurrency;
   units: PricingUnit[];
+}
+
+/**
+ * Where a benchmark dimension's raw value comes from. `lobehub` marks values
+ * derived from our own data (e.g. the price axis) rather than an external board.
+ */
+export type ModelRatingSource = 'artificial-analysis' | 'design-arena' | 'lmarena' | 'lobehub';
+
+export interface ModelBenchmarkScore {
+  /**
+   * raw value from the source platform (index points / Elo / tokens per second /
+   * credits per million tokens), kept for tooltips and offline re-normalization
+   */
+  raw?: number;
+  /**
+   * normalized 0-100 score; semantics are pool-relative (the strongest model in
+   * the rated pool scores 100 on that dimension), not an absolute capability value
+   */
+  score: number;
+  source: ModelRatingSource;
+  /** click-through target showing the source leaderboard */
+  sourceUrl: string;
+  /** date the raw value was collected (YYYY-MM-DD) */
+  updatedAt: string;
+}
+
+/**
+ * Per-dimension benchmark ratings rendered as a radar chart. Every dimension is
+ * optional — external leaderboards lag behind new models, so the UI must handle
+ * missing dimensions (grey them out / skip the radar below a coverage threshold).
+ */
+export interface ModelRating {
+  agentic?: ModelBenchmarkScore;
+  design?: ModelBenchmarkScore;
+  intelligence?: ModelBenchmarkScore;
+  price?: ModelBenchmarkScore;
+  speed?: ModelBenchmarkScore;
+  writing?: ModelBenchmarkScore;
 }
 
 export interface AIBaseModelCard {
@@ -279,13 +339,18 @@ export type ExtendParamsType =
   | 'effort'
   | 'deepseekV4ReasoningEffort'
   | 'reasoningEffort'
+  | 'reasoningMode'
   | 'gpt5ReasoningEffort'
   | 'gpt5_1ReasoningEffort'
   | 'gpt5_2ReasoningEffort'
   | 'gpt5_2ProReasoningEffort'
+  | 'gpt5_6ReasoningEffort'
+  | 'glm5_2ReasoningEffort'
   | 'grok4_20ReasoningEffort'
   | 'grok4_3ReasoningEffort'
+  | 'grok4_5ReasoningEffort'
   | 'hy3ReasoningEffort'
+  | 'kimiK3ReasoningEffort'
   | 'ring2_6ReasoningEffort'
   | 'codexMaxReasoningEffort'
   | 'opus47Effort'
@@ -331,13 +396,18 @@ export const ExtendParamsTypeSchema = z.enum([
   'effort',
   'deepseekV4ReasoningEffort',
   'reasoningEffort',
+  'reasoningMode',
   'gpt5ReasoningEffort',
   'gpt5_1ReasoningEffort',
   'gpt5_2ReasoningEffort',
   'gpt5_2ProReasoningEffort',
+  'gpt5_6ReasoningEffort',
+  'glm5_2ReasoningEffort',
   'grok4_20ReasoningEffort',
   'grok4_3ReasoningEffort',
+  'grok4_5ReasoningEffort',
   'hy3ReasoningEffort',
+  'kimiK3ReasoningEffort',
   'ring2_6ReasoningEffort',
   'codexMaxReasoningEffort',
   'opus47Effort',
@@ -405,9 +475,9 @@ export interface AITTSModelCard extends AIBaseModelCard {
   type: 'tts';
 }
 
-export interface AISTTModelCard extends AIBaseModelCard {
+export interface AIASRModelCard extends AIBaseModelCard {
   pricing?: Pricing;
-  type: 'stt';
+  type: 'asr';
 }
 
 export interface AIRealtimeModelCard extends AIBaseModelCard {
@@ -480,6 +550,7 @@ export interface AiProviderModelListItem {
   abilities?: ModelAbilities;
   config?: AiModelConfig;
   contextWindowTokens?: number;
+  description?: string;
   displayName?: string;
   enabled: boolean;
   family?: string;
@@ -503,8 +574,8 @@ export const UpdateAiModelSchema = z.object({
       deploymentName: z.string().optional(),
     })
     .optional(),
-  contextWindowTokens: z.number().nullable().optional(),
-  displayName: z.string().nullable().optional(),
+  contextWindowTokens: z.number().nullish(),
+  displayName: z.string().nullish(),
   settings: AiModelSettingsSchema.optional(),
   type: AiModelTypeSchema.optional(),
 });
@@ -567,7 +638,9 @@ export interface EnabledAiModel {
   generation?: string;
   id: string;
   knowledgeCutoff?: string;
+  maxOutput?: number;
   parameters?: ModelParamsSchema;
+  pricing?: Pricing;
   providerId: string;
   releasedAt?: string;
   settings?: AiModelSettings;

@@ -18,7 +18,6 @@ import {
   type ListProjectSkillsResult,
   type LocalFileItem,
   type LocalFilePreviewUrlParams,
-  type LocalFilePreviewUrlResult,
   type LocalMoveFilesResultItem,
   type LocalReadFileParams,
   type LocalReadFileResult,
@@ -31,6 +30,8 @@ import {
   type PrepareSkillDirectoryResult,
   type ProjectFileIndexParams,
   type ProjectFileIndexResult,
+  type ProjectFileSearchParams,
+  type ProjectFileSearchResult,
   type RenameLocalFileParams,
   type ResolveSkillResourcePathParams,
   type ResolveSkillResourcePathResult,
@@ -68,13 +69,12 @@ export interface ImageLocalFilePreview {
 export interface TextLocalFilePreview {
   content: string;
   contentType: string;
+  resourceBaseUrl?: string;
   type: 'text';
 }
 
 export type LocalFilePreview =
-  | BinaryLocalFilePreview
-  | ImageLocalFilePreview
-  | TextLocalFilePreview;
+  BinaryLocalFilePreview | ImageLocalFilePreview | TextLocalFilePreview;
 
 const normalizeContentType = (contentType: string | null): string =>
   contentType?.split(';')[0].trim().toLowerCase() ?? '';
@@ -85,6 +85,7 @@ const isTextPreviewMimeType = (mimeType: string): boolean =>
 const fetchLocalFilePreview = async (
   url: string,
   accept?: LocalFilePreviewUrlParams['accept'],
+  resourceScope?: LocalFilePreviewUrlParams['resourceScope'],
 ): Promise<LocalFilePreview> => {
   const response = await fetch(url);
 
@@ -103,7 +104,12 @@ const fetchLocalFilePreview = async (
   }
 
   if (isTextPreviewMimeType(contentType)) {
-    return { content: await response.text(), contentType, type: 'text' };
+    return {
+      content: await response.text(),
+      contentType,
+      resourceBaseUrl: resourceScope === 'workspace' ? new URL('.', url).toString() : undefined,
+      type: 'text',
+    };
   }
 
   if (contentType === 'application/pdf') {
@@ -139,6 +145,10 @@ class LocalFileService {
     return ensureElectronIpc().localSystem.getProjectFileIndex(params);
   }
 
+  async searchProjectFiles(params: ProjectFileSearchParams): Promise<ProjectFileSearchResult> {
+    return ensureElectronIpc().localSystem.searchProjectFiles(params);
+  }
+
   async listProjectSkills(params: ListProjectSkillsParams): Promise<ListProjectSkillsResult> {
     // Project-skill scanning lives in the main-process WorkspaceCtr ('workspace'
     // group), split out of LocalFileCtr — hence the namespace differs from the
@@ -170,20 +180,14 @@ class LocalFileService {
     return ensureElectronIpc().localSystem.auditSafePaths(params);
   }
 
-  async getLocalFilePreviewUrl(
-    params: LocalFilePreviewUrlParams,
-  ): Promise<LocalFilePreviewUrlResult> {
-    return ensureElectronIpc().localSystem.getLocalFilePreviewUrl(params);
-  }
-
   async getLocalFilePreview(params: LocalFilePreviewUrlParams): Promise<LocalFilePreview> {
-    const result = await this.getLocalFilePreviewUrl(params);
+    const result = await ensureElectronIpc().localSystem.getLocalFilePreviewUrl(params);
 
     if (!result.success || !result.url) {
       throw new Error(result.error || 'Missing local file preview URL');
     }
 
-    return fetchLocalFilePreview(result.url, params.accept);
+    return fetchLocalFilePreview(result.url, params.accept, params.resourceScope);
   }
 
   async prepareSkillDirectory(

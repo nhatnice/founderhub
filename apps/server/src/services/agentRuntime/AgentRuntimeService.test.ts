@@ -17,6 +17,9 @@ import {
 } from './types';
 
 vi.mock('@lobechat/model-runtime', () => ({
+  // RuntimeExecutors (loaded transitively) resolves extend params via this
+  // helper; an empty result keeps the runtime payload unchanged.
+  applyModelExtendParams: vi.fn(() => ({})),
   getModelPropertyWithFallback: vi.fn(),
   // `llmErrorClassification.ts` reads these at module-load time; an empty
   // spec map is fine here because this suite never exercises the runtime
@@ -99,18 +102,14 @@ vi.mock('@/server/modules/AgentRuntime', async (importOriginal) => {
   };
 });
 
-vi.mock('@lobechat/agent-runtime', () => ({
+// Spread the real module and override only `AgentRuntime` (to stub `.step()`).
+// Keeps the real status predicates + package-hosted executors (e.g. `finish`),
+// so this mock survives future executor migrations without edits.
+vi.mock('@lobechat/agent-runtime', async (importOriginal) => ({
+  ...((await importOriginal()) as Record<string, unknown>),
   AgentRuntime: vi.fn().mockImplementation((_agent, _options) => ({
     step: vi.fn(),
   })),
-  // Mirror the real status predicates (packages/agent-runtime/src/utils/status.ts)
-  // so completion-lifecycle / getOperationStatus paths don't crash on the mock.
-  isBlockedStatus: (status: string) =>
-    status === 'waiting_for_human' ||
-    status === 'waiting_for_async_tool' ||
-    status === 'interrupted',
-  isParkedStatus: (status: string) =>
-    status === 'waiting_for_human' || status === 'waiting_for_async_tool',
 }));
 
 vi.mock('@/server/services/queue', () => ({
@@ -159,6 +158,55 @@ describe('AgentRuntimeService', () => {
   let mockQueueService: any;
   let mockDb: any;
   const mockUserId = 'test-user-id';
+
+  const buildPersistedToolChain = (
+    finalContent: string,
+    finalMetadata?: Record<string, unknown>,
+  ) => [
+    {
+      content: 'question',
+      createdAt: 1,
+      id: 'user-1',
+      role: 'user',
+      updatedAt: 1,
+    },
+    {
+      content: '',
+      createdAt: 2,
+      id: 'assistant-tools',
+      parentId: 'user-1',
+      role: 'assistant',
+      tools: [
+        {
+          apiName: 'command_execution',
+          arguments: '{}',
+          id: 'tool-call-1',
+          identifier: 'codex',
+          result_msg_id: 'tool-result-1',
+          type: 'default',
+        },
+      ],
+      updatedAt: 2,
+    },
+    {
+      content: 'tool result',
+      createdAt: 3,
+      id: 'tool-result-1',
+      parentId: 'assistant-tools',
+      role: 'tool',
+      tool_call_id: 'tool-call-1',
+      updatedAt: 3,
+    },
+    {
+      content: finalContent,
+      createdAt: 4,
+      id: 'assistant-final',
+      metadata: finalMetadata,
+      parentId: 'tool-result-1',
+      role: 'assistant',
+      updatedAt: 4,
+    },
+  ];
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -324,6 +372,73 @@ describe('AgentRuntimeService', () => {
             evalContext,
           }),
         }),
+      );
+    });
+
+    it('should restore tools activated in a previous operation into initial state', async () => {
+      const taskManifest = { identifier: 'lobe-task' } as any;
+      const initialMessages = [
+        {
+          content: 'Successfully activated tools: lobe-task',
+          id: 'tool-message-1',
+          plugin: { apiName: 'activateTools', identifier: 'lobe-activator' },
+          pluginState: { activatedTools: [{ identifier: 'lobe-task' }] },
+          role: 'tool',
+        },
+      ] as any;
+
+      await service.createOperation({
+        ...mockParams,
+        autoStart: false,
+        initialMessages,
+        initialStepCount: 3,
+        toolSet: {
+          ...mockParams.toolSet,
+          activatableToolIds: ['lobe-task'],
+          manifestMap: { 'lobe-task': taskManifest },
+        },
+      });
+
+      expect(mockCoordinator.saveAgentState).toHaveBeenCalledWith(
+        'test-operation-1',
+        expect.objectContaining({
+          activatedStepTools: [
+            {
+              activatedAtStep: 3,
+              id: 'lobe-task',
+              manifest: taskManifest,
+              source: 'discovery',
+            },
+          ],
+        }),
+      );
+    });
+
+    it('should not restore historical tools that current run gates reject', async () => {
+      await service.createOperation({
+        ...mockParams,
+        autoStart: false,
+        initialMessages: [
+          {
+            content: 'Successfully activated tools: lobe-task',
+            id: 'tool-message-1',
+            plugin: { apiName: 'activateTools', identifier: 'lobe-activator' },
+            pluginState: { activatedTools: [{ identifier: 'lobe-task' }] },
+            role: 'tool',
+          },
+        ] as any,
+        toolSet: {
+          ...mockParams.toolSet,
+          // The broad discovery map may still contain the manifest in chat/custom
+          // mode or for a model without function calling support.
+          activatableToolIds: [],
+          manifestMap: { 'lobe-task': { identifier: 'lobe-task' } as any },
+        },
+      });
+
+      expect(mockCoordinator.saveAgentState).toHaveBeenCalledWith(
+        'test-operation-1',
+        expect.objectContaining({ activatedStepTools: undefined }),
       );
     });
 
@@ -1696,7 +1811,7 @@ describe('AgentRuntimeService', () => {
       expect(casSpy).not.toHaveBeenCalled();
     });
 
-    it('arms a one-shot verify when the parent has not parked yet and scheduleVerifyOnHold is set', async () => {
+    it('arms the first verify (attempt 1, 15s) when the parent has not parked yet and scheduleVerifyOnHold is set', async () => {
       // Child completed before the parent's parking step persisted its state.
       mockCoordinator.loadAgentState.mockResolvedValue({
         pendingToolsCalling: [],
@@ -1712,14 +1827,15 @@ describe('AgentRuntimeService', () => {
       expect(won).toBe(false);
       expect(mockQueueService.scheduleMessage).toHaveBeenCalledWith(
         expect.objectContaining({
+          delay: 15_000,
           operationId: parentOpId,
-          payload: { verifyAsyncToolBarrier: true },
+          payload: { asyncToolVerifyAttempt: 1, verifyAsyncToolBarrier: true },
           stepIndex: 2,
         }),
       );
     });
 
-    it('arms a one-shot verify when the barrier is unsatisfied and scheduleVerifyOnHold is set', async () => {
+    it('arms a verify when the barrier is unsatisfied and scheduleVerifyOnHold is set', async () => {
       mockCoordinator.loadAgentState.mockResolvedValue({
         pendingToolsCalling: [{ id: 'tc1' }],
         status: 'waiting_for_async_tool',
@@ -1736,7 +1852,104 @@ describe('AgentRuntimeService', () => {
 
       expect(won).toBe(false);
       expect(mockQueueService.scheduleMessage).toHaveBeenCalledWith(
-        expect.objectContaining({ payload: { verifyAsyncToolBarrier: true } }),
+        expect.objectContaining({
+          payload: { asyncToolVerifyAttempt: 1, verifyAsyncToolBarrier: true },
+        }),
+      );
+    });
+
+    it('re-arms the next verify with exponential backoff while the barrier holds', async () => {
+      mockCoordinator.loadAgentState.mockResolvedValue({
+        pendingToolsCalling: [{ id: 'tc1' }],
+        status: 'waiting_for_async_tool',
+        stepCount: 1,
+      });
+      (service as any).serverDB.query = {
+        messagePlugins: { findFirst: vi.fn().mockResolvedValue(null) },
+      };
+
+      // A verify handler running as attempt 2 re-arms attempt 3 (60s).
+      await service.tryResumeParentFromAsyncTool(
+        { parentOperationId: parentOpId },
+        { scheduleVerifyOnHold: true, verifyAttempt: 3 },
+      );
+
+      expect(mockQueueService.scheduleMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          delay: 60_000,
+          payload: { asyncToolVerifyAttempt: 3, verifyAsyncToolBarrier: true },
+        }),
+      );
+    });
+
+    it('stops re-arming once the bounded attempts are exhausted', async () => {
+      mockCoordinator.loadAgentState.mockResolvedValue({
+        pendingToolsCalling: [{ id: 'tc1' }],
+        status: 'waiting_for_async_tool',
+        stepCount: 1,
+      });
+      (service as any).serverDB.query = {
+        messagePlugins: { findFirst: vi.fn().mockResolvedValue(null) },
+      };
+
+      const won = await service.tryResumeParentFromAsyncTool(
+        { parentOperationId: parentOpId },
+        { scheduleVerifyOnHold: true, verifyAttempt: 6 },
+      );
+
+      expect(won).toBe(false);
+      expect(mockQueueService.scheduleMessage).not.toHaveBeenCalled();
+    });
+
+    it('trusts a just-backfilled message id without re-reading it (read-your-writes)', async () => {
+      mockCoordinator.loadAgentState.mockResolvedValue({
+        pendingToolsCalling: [{ id: 'tc1' }],
+        status: 'waiting_for_async_tool',
+        stepCount: 3,
+      });
+      // Plugin row exists (created at park) but its state still reads stale.
+      const findById = vi.fn().mockResolvedValue({ content: '' });
+      (service as any).serverDB.query = {
+        messagePlugins: {
+          findFirst: vi.fn().mockResolvedValue({ id: 'msg-tc1', state: null, toolCallId: 'tc1' }),
+        },
+      };
+      (service as any).messageModel.findById = findById;
+      const casSpy = vi
+        .spyOn(AgentOperationModel.prototype, 'tryResumeFromAsyncTool')
+        .mockResolvedValue(true);
+
+      const won = await service.tryResumeParentFromAsyncTool(
+        { parentOperationId: parentOpId },
+        { knownFulfilledMessageId: 'msg-tc1' },
+      );
+
+      expect(won).toBe(true);
+      expect(casSpy).toHaveBeenCalledWith(parentOpId);
+      // The stale read must be skipped — barrier trusted the local backfill.
+      expect(findById).not.toHaveBeenCalled();
+    });
+
+    it('arms a fallback verify when a parked op has no pending tools', async () => {
+      mockCoordinator.loadAgentState.mockResolvedValue({
+        pendingToolsCalling: [],
+        status: 'waiting_for_async_tool',
+        stepCount: 4,
+      });
+      const casSpy = vi.spyOn(AgentOperationModel.prototype, 'tryResumeFromAsyncTool');
+
+      const won = await service.tryResumeParentFromAsyncTool(
+        { parentOperationId: parentOpId },
+        { scheduleVerifyOnHold: true },
+      );
+
+      expect(won).toBe(false);
+      expect(casSpy).not.toHaveBeenCalled();
+      expect(mockQueueService.scheduleMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          payload: { asyncToolVerifyAttempt: 1, verifyAsyncToolBarrier: true },
+          stepIndex: 4,
+        }),
       );
     });
 
@@ -1754,6 +1967,306 @@ describe('AgentRuntimeService', () => {
 
       expect(won).toBe(false);
       expect(mockQueueService.scheduleMessage).not.toHaveBeenCalled();
+    });
+
+    it('arms a verify when the parent state is missing/expired and scheduleVerifyOnHold is set', async () => {
+      // Redis read replica hasn't seen the park yet, or the child outran the
+      // parent's park. A missing state must retry, not strand on the first miss.
+      mockCoordinator.loadAgentState.mockResolvedValue(null);
+      const casSpy = vi.spyOn(AgentOperationModel.prototype, 'tryResumeFromAsyncTool');
+
+      const won = await service.tryResumeParentFromAsyncTool(
+        { parentOperationId: parentOpId },
+        { scheduleVerifyOnHold: true },
+      );
+
+      expect(won).toBe(false);
+      expect(casSpy).not.toHaveBeenCalled();
+      expect(mockQueueService.scheduleMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          operationId: parentOpId,
+          payload: { asyncToolVerifyAttempt: 1, verifyAsyncToolBarrier: true },
+          // No state to read stepCount from — falls back to 0.
+          stepIndex: 0,
+        }),
+      );
+    });
+
+    it('does not arm a verify on missing state when scheduleVerifyOnHold is not set', async () => {
+      // The clean-done bridge path resumes without opting into the watchdog;
+      // a missing state there must stay a silent no-op, not schedule a re-check.
+      mockCoordinator.loadAgentState.mockResolvedValue(null);
+
+      const won = await service.tryResumeParentFromAsyncTool({ parentOperationId: parentOpId });
+
+      expect(won).toBe(false);
+      expect(mockQueueService.scheduleMessage).not.toHaveBeenCalled();
+    });
+
+    it('stops re-arming on missing state once the bounded attempts are exhausted', async () => {
+      mockCoordinator.loadAgentState.mockResolvedValue(null);
+
+      const won = await service.tryResumeParentFromAsyncTool(
+        { parentOperationId: parentOpId },
+        { scheduleVerifyOnHold: true, verifyAttempt: 6 },
+      );
+
+      expect(won).toBe(false);
+      expect(mockQueueService.scheduleMessage).not.toHaveBeenCalled();
+    });
+
+    it('schedules a finish step when the parked tool requests onComplete=finish (skipCallSupervisor / delegate)', async () => {
+      mockCoordinator.loadAgentState.mockResolvedValue({
+        pendingToolsCalling: [{ id: 'tc1' }],
+        status: 'waiting_for_async_tool',
+        stepCount: 4,
+      });
+      (service as any).serverDB.query = {
+        messagePlugins: {
+          findFirst: vi.fn().mockResolvedValue({
+            id: 'msg-tc1',
+            state: { onComplete: 'finish', status: 'completed' },
+            toolCallId: 'tc1',
+          }),
+        },
+      };
+      (service as any).messageModel.findById = vi.fn().mockResolvedValue({ content: 'answer' });
+      vi.spyOn(AgentOperationModel.prototype, 'tryResumeFromAsyncTool').mockResolvedValue(true);
+
+      const won = await service.tryResumeParentFromAsyncTool({ parentOperationId: parentOpId });
+
+      expect(won).toBe(true);
+      expect(mockQueueService.scheduleMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ payload: { finishAfterAsyncTool: true }, stepIndex: 4 }),
+      );
+    });
+  });
+
+  describe('completeGroupActionMember', () => {
+    const memberState = {
+      messages: [
+        { content: 'question', role: 'user' },
+        { content: 'final answer', role: 'assistant' },
+      ],
+      metadata: { agentId: 'agent-a' },
+      modelRuntimeConfig: { model: 'gpt-test' },
+      status: 'done',
+      usage: { llm: { tokens: { total: 42 } }, tools: { totalCalls: 2 } },
+    };
+
+    let updateToolMessage: ReturnType<typeof vi.fn>;
+    let resumeSpy: MockInstance<AgentRuntimeService['tryResumeParentFromAsyncTool']>;
+
+    beforeEach(() => {
+      updateToolMessage = vi.fn().mockResolvedValue({ success: true });
+      (service as any).messageModel.updateToolMessage = updateToolMessage;
+      resumeSpy = vi.spyOn(service, 'tryResumeParentFromAsyncTool').mockResolvedValue(true);
+    });
+
+    it('single in-group member: backfills a receipt onto the group tool and resumes', async () => {
+      const won = await service.completeGroupActionMember({
+        anchorMessageId: 'grp-tool-1',
+        expectedMembers: 1,
+        finalState: memberState as any,
+        groupToolMessageId: 'grp-tool-1',
+        mode: 'in_group',
+        onComplete: 'resume',
+        operationId: 'child-1',
+        parentOperationId: 'parent-1',
+        reason: 'done',
+      });
+
+      expect(won).toBe(true);
+      expect(updateToolMessage).toHaveBeenCalledWith(
+        'grp-tool-1',
+        expect.objectContaining({
+          content: 'Agent agent-a responded in the group.',
+          pluginState: expect.objectContaining({ status: 'completed' }),
+        }),
+      );
+      expect(resumeSpy).toHaveBeenCalledWith(
+        { parentOperationId: 'parent-1' },
+        { scheduleVerifyOnHold: true },
+      );
+    });
+
+    it('single isolated member: backfills the final answer', async () => {
+      await service.completeGroupActionMember({
+        anchorMessageId: 'grp-tool-1',
+        expectedMembers: 1,
+        finalState: memberState as any,
+        groupToolMessageId: 'grp-tool-1',
+        mode: 'isolated',
+        onComplete: 'resume',
+        operationId: 'child-1',
+        parentOperationId: 'parent-1',
+        reason: 'done',
+      });
+
+      expect(updateToolMessage).toHaveBeenCalledWith(
+        'grp-tool-1',
+        expect.objectContaining({ content: 'final answer' }),
+      );
+    });
+
+    it('single isolated member: extracts the final answer from an assistantGroup', async () => {
+      await service.completeGroupActionMember({
+        anchorMessageId: 'grp-tool-1',
+        expectedMembers: 1,
+        finalState: {
+          ...memberState,
+          messages: [
+            { content: 'question', role: 'user' },
+            {
+              children: [
+                {
+                  content: '',
+                  id: 'assistant-tools',
+                  tools: [
+                    {
+                      id: 'tool-call-1',
+                      result: { content: 'tool result', id: 'tool-result-1' },
+                    },
+                  ],
+                },
+                { content: 'grouped member answer', id: 'assistant-final' },
+              ],
+              content: '',
+              id: 'assistant-group',
+              role: 'assistantGroup',
+            },
+          ],
+        } as any,
+        groupToolMessageId: 'grp-tool-1',
+        mode: 'isolated',
+        onComplete: 'resume',
+        operationId: 'child-1',
+        parentOperationId: 'parent-1',
+        reason: 'done',
+      });
+
+      expect(updateToolMessage).toHaveBeenCalledWith(
+        'grp-tool-1',
+        expect.objectContaining({ content: 'grouped member answer' }),
+      );
+    });
+
+    it('single isolated member: extracts serialized multimodal text after DB rehydration', async () => {
+      mockCoordinator.loadAgentState.mockResolvedValue({
+        ...memberState,
+        messages: undefined,
+      });
+      (service as any).messageModel.query.mockResolvedValue(
+        buildPersistedToolChain(
+          JSON.stringify([
+            { text: 'persisted member answer', type: 'text' },
+            { image: 'https://example.com/image.png', type: 'image' },
+          ]),
+          { isMultimodal: true },
+        ),
+      );
+
+      await service.completeGroupActionMember({
+        anchorMessageId: 'grp-tool-1',
+        expectedMembers: 1,
+        groupToolMessageId: 'grp-tool-1',
+        mode: 'isolated',
+        onComplete: 'resume',
+        operationId: 'child-1',
+        parentOperationId: 'parent-1',
+        reason: 'done',
+      });
+
+      expect(updateToolMessage).toHaveBeenCalledWith(
+        'grp-tool-1',
+        expect.objectContaining({ content: 'persisted member answer' }),
+      );
+    });
+
+    it('multi-member: holds (no group-tool backfill, no resume) until the barrier is met', async () => {
+      (service as any).serverDB.query = {
+        messagePlugins: { findFirst: vi.fn() },
+        messages: {
+          findMany: vi
+            .fn()
+            .mockResolvedValue([{ content: 'a note', id: 'anchor-0', role: 'tool' }]),
+        },
+      };
+      mockCoordinator.loadAgentState.mockResolvedValue({
+        status: 'waiting_for_async_tool',
+        stepCount: 1,
+      });
+
+      const won = await service.completeGroupActionMember({
+        anchorMessageId: 'anchor-0',
+        expectedMembers: 2,
+        finalState: memberState as any,
+        groupToolMessageId: 'grp-tool-1',
+        mode: 'in_group',
+        onComplete: 'resume',
+        operationId: 'child-1',
+        parentOperationId: 'parent-1',
+        reason: 'done',
+      });
+
+      expect(won).toBe(false);
+      expect(updateToolMessage).toHaveBeenCalledWith('anchor-0', expect.anything());
+      expect(updateToolMessage).not.toHaveBeenCalledWith('grp-tool-1', expect.anything());
+      expect(resumeSpy).not.toHaveBeenCalled();
+    });
+
+    it('multi-member: last completion backfills the group tool and resumes', async () => {
+      (service as any).serverDB.query = {
+        messagePlugins: { findFirst: vi.fn() },
+        messages: {
+          findMany: vi.fn().mockResolvedValue([
+            { content: 'a', id: 'anchor-0', role: 'tool' },
+            { content: 'b', id: 'anchor-1', role: 'tool' },
+          ]),
+        },
+      };
+
+      const won = await service.completeGroupActionMember({
+        anchorMessageId: 'anchor-1',
+        expectedMembers: 2,
+        finalState: memberState as any,
+        groupToolMessageId: 'grp-tool-1',
+        mode: 'in_group',
+        onComplete: 'resume',
+        operationId: 'child-2',
+        parentOperationId: 'parent-1',
+        reason: 'done',
+      });
+
+      expect(won).toBe(true);
+      expect(updateToolMessage).toHaveBeenCalledWith('anchor-1', expect.anything());
+      expect(updateToolMessage).toHaveBeenCalledWith(
+        'grp-tool-1',
+        expect.objectContaining({
+          content: 'All 2 agent members completed.',
+          pluginState: expect.objectContaining({ status: 'completed' }),
+        }),
+      );
+      expect(resumeSpy).toHaveBeenCalled();
+    });
+
+    it('throws when the anchor backfill fails so the webhook redelivers', async () => {
+      updateToolMessage.mockResolvedValue({ success: false });
+
+      await expect(
+        service.completeGroupActionMember({
+          anchorMessageId: 'grp-tool-1',
+          expectedMembers: 1,
+          finalState: memberState as any,
+          groupToolMessageId: 'grp-tool-1',
+          mode: 'in_group',
+          onComplete: 'resume',
+          operationId: 'child-1',
+          parentOperationId: 'parent-1',
+          reason: 'done',
+        }),
+      ).rejects.toThrow(/failed to backfill anchor/);
+      expect(resumeSpy).not.toHaveBeenCalled();
     });
   });
 
@@ -1805,7 +2318,7 @@ describe('AgentRuntimeService', () => {
       });
       expect(resumeSpy).toHaveBeenCalledWith(
         { parentOperationId: 'parent-op-1' },
-        { scheduleVerifyOnHold: true },
+        { knownFulfilledMessageId: 'tool-msg-1', scheduleVerifyOnHold: true },
       );
     });
 
@@ -1821,7 +2334,124 @@ describe('AgentRuntimeService', () => {
       );
     });
 
-    it('writes an error note + pluginError when the child failed', async () => {
+    it('extracts a grouped final answer after webhook state is rehydrated from the DB', async () => {
+      mockCoordinator.loadAgentState.mockResolvedValue({
+        ...childState,
+        messages: undefined,
+      });
+      (service as any).messageModel.query.mockResolvedValue(
+        buildPersistedToolChain('final answer after tool use'),
+      );
+
+      await service.completeSubAgentBridge(bridgeParams);
+
+      expect(updateToolMessage).toHaveBeenCalledWith(
+        'tool-msg-1',
+        expect.objectContaining({ content: 'final answer after tool use' }),
+      );
+    });
+
+    it('extracts text from serialized multimodal content after DB query and group parsing', async () => {
+      mockCoordinator.loadAgentState.mockResolvedValue({
+        ...childState,
+        messages: undefined,
+      });
+      (service as any).messageModel.query.mockResolvedValue(
+        buildPersistedToolChain(
+          JSON.stringify([
+            { text: 'persisted multimodal answer', type: 'text' },
+            { image: 'https://example.com/image.png', type: 'image' },
+          ]),
+          { isMultimodal: true },
+        ),
+      );
+
+      await service.completeSubAgentBridge(bridgeParams);
+
+      expect(updateToolMessage).toHaveBeenCalledWith(
+        'tool-msg-1',
+        expect.objectContaining({ content: 'persisted multimodal answer' }),
+      );
+    });
+
+    it('uses the no-text fallback for an image-only serialized final assistant', async () => {
+      mockCoordinator.loadAgentState.mockResolvedValue({
+        ...childState,
+        messages: undefined,
+      });
+      (service as any).messageModel.query.mockResolvedValue(
+        buildPersistedToolChain(
+          JSON.stringify([{ image: 'https://example.com/image.png', type: 'image' }]),
+          { isMultimodal: true },
+        ),
+      );
+
+      await service.completeSubAgentBridge(bridgeParams);
+
+      expect(updateToolMessage).toHaveBeenCalledWith(
+        'tool-msg-1',
+        expect.objectContaining({ content: 'Sub-agent completed without a textual answer.' }),
+      );
+    });
+
+    it('extracts text parts from the grouped final assistant content', async () => {
+      await service.completeSubAgentBridge({
+        ...bridgeParams,
+        finalState: {
+          ...childState,
+          messages: [
+            {
+              children: [
+                {
+                  content: [
+                    { text: 'final answer', type: 'text' },
+                    { image_url: { url: 'https://example.com/image.png' }, type: 'image_url' },
+                  ],
+                  id: 'assistant-final',
+                },
+              ],
+              content: '',
+              id: 'assistant-group',
+              role: 'assistantGroup',
+            },
+          ],
+        } as any,
+      });
+
+      expect(updateToolMessage).toHaveBeenCalledWith(
+        'tool-msg-1',
+        expect.objectContaining({ content: 'final answer' }),
+      );
+    });
+
+    it('does not fall back to stale text when the grouped final assistant is empty', async () => {
+      await service.completeSubAgentBridge({
+        ...bridgeParams,
+        finalState: {
+          ...childState,
+          messages: [
+            { content: 'stale answer', id: 'assistant-stale', role: 'assistant' },
+            { content: 'follow-up', id: 'user-follow-up', role: 'user' },
+            {
+              children: [{ content: '', id: 'assistant-final' }],
+              content: '',
+              id: 'assistant-group',
+              role: 'assistantGroup',
+            },
+          ],
+        } as any,
+      });
+
+      expect(updateToolMessage).toHaveBeenCalledWith(
+        'tool-msg-1',
+        expect.objectContaining({ content: 'Sub-agent completed without a textual answer.' }),
+      );
+    });
+
+    it('writes an error note + pluginError when the child failed, surfacing the real reason', async () => {
+      // The parent agent's LLM only sees `content`; without the inlined reason it
+      // gets the opaque generic note and cannot tell why the dispatch failed
+      // (issue #16257). The structured error still rides on pluginError.
       await service.completeSubAgentBridge({
         ...bridgeParams,
         finalState: { ...childState, error: { message: 'boom' } } as any,
@@ -1831,11 +2461,39 @@ describe('AgentRuntimeService', () => {
       expect(updateToolMessage).toHaveBeenCalledWith(
         'tool-msg-1',
         expect.objectContaining({
-          content: 'Sub-agent did not complete (error).',
+          content: 'Sub-agent did not complete (error): boom',
           pluginError: { message: 'boom' },
           pluginState: expect.objectContaining({ status: 'error' }),
         }),
       );
+    });
+
+    it('falls back to the generic note when the failed child has no error detail', async () => {
+      await service.completeSubAgentBridge({
+        ...bridgeParams,
+        finalState: { ...childState, error: undefined } as any,
+        reason: 'error',
+      });
+
+      expect(updateToolMessage).toHaveBeenCalledWith(
+        'tool-msg-1',
+        expect.objectContaining({
+          content: 'Sub-agent did not complete (error).',
+          pluginState: expect.objectContaining({ status: 'error' }),
+        }),
+      );
+    });
+
+    it('truncates an oversized child error so it cannot bloat the parent context', async () => {
+      const huge = 'x'.repeat(500);
+      await service.completeSubAgentBridge({
+        ...bridgeParams,
+        finalState: { ...childState, error: { message: huge } } as any,
+        reason: 'error',
+      });
+
+      const call = updateToolMessage.mock.calls.at(-1)?.[1];
+      expect(call.content).toBe(`Sub-agent did not complete (error): ${'x'.repeat(300)}…`);
     });
 
     it('throws when the backfill reports success: false so the webhook path redelivers', async () => {
@@ -1857,6 +2515,95 @@ describe('AgentRuntimeService', () => {
         service.completeSubAgentBridge({ ...bridgeParams, finalState: childState as any }),
       ).rejects.toThrow('db down');
       expect(resumeSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('resolveAsyncToolOnComplete', () => {
+    it('returns finish when ANY pending tool requests finish (not just the first)', async () => {
+      // First pending tool resumes; a later one is a group finish action. The
+      // disposition must scan all pending tools, not only pending[0].
+      (service as any).serverDB.query = {
+        messagePlugins: {
+          findFirst: vi
+            .fn()
+            .mockResolvedValueOnce({ state: { status: 'completed' } })
+            .mockResolvedValueOnce({ state: { onComplete: 'finish', status: 'completed' } }),
+        },
+      };
+
+      const result = await (service as any).resolveAsyncToolOnComplete([
+        { id: 'tc1' },
+        { id: 'tc2' },
+      ]);
+
+      expect(result).toBe('finish');
+    });
+
+    it('returns resume when no pending tool requests finish', async () => {
+      (service as any).serverDB.query = {
+        messagePlugins: {
+          findFirst: vi.fn().mockResolvedValue({ state: { status: 'completed' } }),
+        },
+      };
+
+      const result = await (service as any).resolveAsyncToolOnComplete([
+        { id: 'tc1' },
+        { id: 'tc2' },
+      ]);
+
+      expect(result).toBe('resume');
+    });
+  });
+
+  describe('group member timeout watchdog', () => {
+    const timeoutParams = {
+      anchorMessageId: 'anchor-1',
+      expectedMembers: 1,
+      groupToolMessageId: 'grp-tool-1',
+      memberOperationId: 'member-op-1',
+      mode: 'isolated' as const,
+      onComplete: 'resume' as const,
+      parentOperationId: 'parent-1',
+    };
+
+    it('no-ops when the member already reached a terminal state', async () => {
+      mockCoordinator.loadAgentState.mockResolvedValue({ status: 'done' });
+      const interruptSpy = vi.spyOn(service, 'interruptOperation');
+      const bridgeSpy = vi.spyOn(service, 'completeGroupActionMember');
+
+      const result = await service.executeStep({
+        groupMemberTimeout: timeoutParams,
+        operationId: 'member-op-1',
+        stepIndex: 0,
+      } as any);
+
+      expect(result.success).toBe(true);
+      expect(result.nextStepScheduled).toBe(false);
+      expect(interruptSpy).not.toHaveBeenCalled();
+      expect(bridgeSpy).not.toHaveBeenCalled();
+    });
+
+    it('interrupts the member and bridges a timeout when it is still running', async () => {
+      mockCoordinator.loadAgentState.mockResolvedValue({ status: 'running' });
+      const interruptSpy = vi.spyOn(service, 'interruptOperation').mockResolvedValue(true);
+      const bridgeSpy = vi.spyOn(service, 'completeGroupActionMember').mockResolvedValue(true);
+
+      const result = await service.executeStep({
+        groupMemberTimeout: timeoutParams,
+        operationId: 'member-op-1',
+        stepIndex: 0,
+      } as any);
+
+      expect(interruptSpy).toHaveBeenCalledWith('member-op-1');
+      expect(bridgeSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          onComplete: 'resume',
+          operationId: 'member-op-1',
+          parentOperationId: 'parent-1',
+          reason: 'timeout',
+        }),
+      );
+      expect(result.nextStepScheduled).toBe(true);
     });
   });
 });

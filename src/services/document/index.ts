@@ -100,6 +100,12 @@ export interface CreateDocumentParams {
   parentId?: string;
   slug?: string;
   title: string;
+  /**
+   * Workspace-only: force the new document into a specific visibility bucket.
+   * Omit to let the server pick the default (`api` sourceType top-level docs
+   * default to `private`, nested docs inherit their parent).
+   */
+  visibility?: 'private' | 'public';
 }
 
 export interface ListDocumentHistoryParams extends ListHistoryInput {}
@@ -233,17 +239,17 @@ export class DocumentService {
    * Acquire or refresh the collaborative edit lock for a workspace page.
    * Doubles as the heartbeat. Personal pages always report as unlocked.
    */
-  async acquireDocumentLock(id: string) {
-    return lambdaClient.document.acquireDocumentLock.mutate({ id });
+  async acquireDocumentLock(id: string, ownerId?: string) {
+    return lambdaClient.document.acquireDocumentLock.mutate({ id, ownerId });
   }
 
   /** Read-only peek of the current edit lock (does not acquire). */
-  async getDocumentLock(id: string) {
-    return lambdaClient.document.getDocumentLock.query({ id });
+  async getDocumentLock(id: string, ownerId?: string) {
+    return lambdaClient.document.getDocumentLock.query({ id, ownerId });
   }
 
-  async releaseDocumentLock(id: string): Promise<void> {
-    await lambdaClient.document.releaseDocumentLock.mutate({ id });
+  async releaseDocumentLock(id: string, ownerId?: string): Promise<void> {
+    await lambdaClient.document.releaseDocumentLock.mutate({ id, ownerId });
   }
 
   async saveDocumentHistory(params: SaveDocumentHistoryInput): Promise<SaveDocumentHistoryOutput> {
@@ -254,15 +260,49 @@ export class DocumentService {
     };
   }
 
-  async transferDocument(documentId: string, targetWorkspaceId: string | null): Promise<void> {
-    await lambdaClient.document.transferDocument.mutate({ documentId, targetWorkspaceId });
+  async transferDocument(
+    documentId: string,
+    targetWorkspaceId: string | null,
+    targetVisibility?: 'private' | 'public',
+  ): Promise<void> {
+    await lambdaClient.document.transferDocument.mutate({
+      documentId,
+      targetVisibility,
+      targetWorkspaceId,
+    });
   }
 
   async copyDocumentToWorkspace(
     documentId: string,
     targetWorkspaceId: string | null,
+    targetVisibility?: 'private' | 'public',
   ): Promise<{ rootId: string }> {
-    return lambdaClient.document.copyDocumentToWorkspace.mutate({ documentId, targetWorkspaceId });
+    return lambdaClient.document.copyDocumentToWorkspace.mutate({
+      documentId,
+      targetVisibility,
+      targetWorkspaceId,
+    });
+  }
+
+  /**
+   * Publish a private document (and its whole subtree) into the workspace.
+   * Thin wrapper around `setDocumentVisibility(id, 'public')`; kept for
+   * existing callers.
+   */
+  async publishDocumentToWorkspace(id: string): Promise<{ documentIds: string[] }> {
+    return lambdaClient.document.publishDocumentToWorkspace.mutate({ id });
+  }
+
+  /**
+   * Flip a document subtree's workspace visibility. Bidirectional companion
+   * to `publishDocumentToWorkspace`. Server cascades over the whole subtree
+   * for P1 tree consistency.
+   */
+  async setDocumentVisibility(
+    id: string,
+    visibility: 'private' | 'public',
+  ): Promise<{ documentIds: string[] }> {
+    return lambdaClient.document.setDocumentVisibility.mutate({ id, visibility });
   }
 }
 

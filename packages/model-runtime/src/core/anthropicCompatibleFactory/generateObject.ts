@@ -2,6 +2,7 @@ import type Anthropic from '@anthropic-ai/sdk';
 import debug from 'debug';
 import type { Pricing } from 'model-bank';
 
+import { stripUnsupportedClaudeAssistantPrefill } from '../../providers/anthropic/claudePrefill';
 import type { GenerateObjectOptions, GenerateObjectPayload } from '../../types';
 import { buildAnthropicMessages, buildAnthropicTools } from '../contextBuilders/anthropic';
 import { buildAnthropicInitialUsage } from '../usageConverters/anthropic';
@@ -11,6 +12,7 @@ const log = debug('lobe-model-runtime:anthropic:generate-object');
 
 export interface AnthropicGenerateObjectConfig {
   maxTokens?: number;
+  requestModel?: string;
   requestParams?: Pick<Anthropic.MessageCreateParamsNonStreaming, 'output_config' | 'thinking'>;
   schemaToolChoice?: 'any' | 'tool';
   schemaToolStrict?: boolean;
@@ -46,7 +48,13 @@ export const buildAnthropicGenerateObjectRequest = async (
   const systemPromptText =
     typeof system_message === 'string' && system_message.trim() ? system_message : undefined;
   const user_messages = messages.filter((m) => m.role !== 'system');
-  const anthropicMessages = await buildAnthropicMessages(user_messages);
+  // Key the prefill guard on the model actually sent: a custom logical id the
+  // parser doesn't recognize can map to a Claude 4.6+/5 `requestModel`, which
+  // would otherwise skip the strip and 400 on a trailing assistant turn.
+  const anthropicMessages = stripUnsupportedClaudeAssistantPrefill(
+    config?.requestModel ?? model,
+    await buildAnthropicMessages(user_messages),
+  );
 
   log('converted %d messages to Anthropic format', anthropicMessages.length);
 
@@ -148,11 +156,14 @@ export const createAnthropicGenerateObject = async (
     payload,
     config,
   );
+  const finalRequestParams = config?.requestModel
+    ? { ...requestParams, model: config.requestModel }
+    : requestParams;
 
   try {
-    log('calling Anthropic API with max_tokens: %d', requestParams.max_tokens);
+    log('calling Anthropic API with max_tokens: %d', finalRequestParams.max_tokens);
 
-    const response = await client.messages.create(requestParams, { signal: options?.signal });
+    const response = await client.messages.create(finalRequestParams, { signal: options?.signal });
 
     log('received response with %d content blocks', response.content.length);
     log('response: %O', response);

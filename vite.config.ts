@@ -12,10 +12,13 @@ import {
   createSharedRolldownOutput,
   sharedModulePreload,
   sharedOptimizeDeps,
+  sharedPwaGlobIgnores,
+  sharedPwaRuntimeCaching,
   sharedRendererDefine,
   sharedRendererPlugins,
 } from './plugins/vite/sharedRendererConfig';
 import { vercelSkewProtection } from './plugins/vite/vercelSkewProtection';
+import { createViteWatchOptions } from './plugins/vite/watchOptions';
 
 const isMobile = process.env.MOBILE === 'true';
 const isAuth = process.env.AUTH === 'true';
@@ -260,9 +263,11 @@ export default defineConfig({
         manifest: false,
         registerType: 'prompt',
         workbox: {
+          globIgnores: sharedPwaGlobIgnores,
           globPatterns: ['**/*.{js,css,html,woff2}'],
           maximumFileSizeToCacheInBytes: 10 * 1024 * 1024,
           runtimeCaching: [
+            ...sharedPwaRuntimeCaching,
             {
               handler: 'StaleWhileRevalidate',
               options: { cacheName: 'google-fonts-stylesheets' },
@@ -300,7 +305,15 @@ export default defineConfig({
   server: {
     cors: true,
     host: true,
-    port: 9876,
+    port: isMobile
+      ? Number(process.env.MOBILE_SPA_PORT) || 3012
+      : isAuth
+        ? Number(process.env.AUTH_SPA_PORT) || 3013
+        : Number(process.env.SPA_PORT) || 9876,
+    // The dev orchestrator (scripts/devStartupSequence.mts) pre-resolves a free
+    // port and injects it via env; never silently drift to another port, since
+    // downstream consumers locate this server through that env contract.
+    strictPort: true,
     proxy: {
       '/api': `http://localhost:${process.env.PORT || 3010}`,
       '/oidc': `http://localhost:${process.env.PORT || 3010}`,
@@ -356,8 +369,6 @@ export default defineConfig({
         './packages/agent-manager-runtime/src/**/*.ts',
       ],
     },
-    watch: {
-      ignored: ['**/e2e/reports/**', '**/e2e/screenshots/**'],
-    },
+    watch: createViteWatchOptions([__dirname]),
   },
 });

@@ -37,6 +37,7 @@ const {
     setFullScreen: vi.fn(),
     setPosition: vi.fn(),
     setTitleBarOverlay: vi.fn(),
+    setVibrancy: vi.fn(),
     show: vi.fn(),
     unmaximize: vi.fn(),
     webContents: {
@@ -59,6 +60,7 @@ const {
         setBadge: vi.fn(),
         show: vi.fn(),
       },
+      getVersion: vi.fn(() => '1.2.3'),
       setActivationPolicy: vi.fn(),
       setBadgeCount: vi.fn(),
     },
@@ -244,6 +246,46 @@ describe('Browser', () => {
     it('should set identifier and options', () => {
       expect(browser.identifier).toBe('test-window');
       expect(browser.options).toEqual(defaultOptions);
+    });
+
+    it('should reject webviews outside the approved browser partition', () => {
+      const handler = mockBrowserWindow.webContents.on.mock.calls.find(
+        ([eventName]) => eventName === 'will-attach-webview',
+      )?.[1];
+      const event = { preventDefault: vi.fn() };
+      const webPreferences = { nodeIntegration: true, preload: '/tmp/evil.js' };
+
+      handler(event, webPreferences, {
+        partition: 'persist:attacker-controlled',
+        src: 'https://example.com',
+      });
+
+      expect(event.preventDefault).toHaveBeenCalledOnce();
+      expect(webPreferences).toEqual({ nodeIntegration: true, preload: '/tmp/evil.js' });
+    });
+
+    it('should harden webviews in the approved browser partition', () => {
+      const handler = mockBrowserWindow.webContents.on.mock.calls.find(
+        ([eventName]) => eventName === 'will-attach-webview',
+      )?.[1];
+      const event = { preventDefault: vi.fn() };
+      const webPreferences: Record<string, unknown> = {
+        nodeIntegration: true,
+        preload: '/tmp/evil.js',
+      };
+
+      handler(event, webPreferences, {
+        partition: 'persist:lobe-browser-app',
+        src: 'https://example.com',
+      });
+
+      expect(event.preventDefault).not.toHaveBeenCalled();
+      expect(webPreferences).toMatchObject({
+        contextIsolation: true,
+        nodeIntegration: false,
+        partition: 'persist:lobe-browser-app',
+      });
+      expect(webPreferences).not.toHaveProperty('preload');
     });
 
     it('should create BrowserWindow on construction', () => {
@@ -563,6 +605,27 @@ describe('Browser', () => {
           isFullScreen: false,
         });
       });
+
+      it('should disable macOS vibrancy in fullscreen and restore it after leaving', () => {
+        mockEnv.isMac = true;
+        mockEnv.isWindows = false;
+        mockBrowserWindow.on.mockClear();
+
+        new Browser(defaultOptions, mockApp);
+
+        const enterHandler = mockBrowserWindow.on.mock.calls.find(
+          (call) => call[0] === 'enter-full-screen',
+        )?.[1];
+        const leaveHandler = mockBrowserWindow.on.mock.calls.find(
+          (call) => call[0] === 'leave-full-screen',
+        )?.[1];
+
+        enterHandler();
+        expect(mockBrowserWindow.setVibrancy).toHaveBeenLastCalledWith(null);
+
+        leaveHandler();
+        expect(mockBrowserWindow.setVibrancy).toHaveBeenLastCalledWith('sidebar');
+      });
     });
 
     describe('close', () => {
@@ -795,6 +858,30 @@ describe('Browser', () => {
       willNavigateHandler(mockEvent, 'http://localhost:3000/payment/upgrade-success');
 
       expect(mockEvent.preventDefault).not.toHaveBeenCalled();
+      expect(mockShell.openExternal).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('window open handling', () => {
+    let windowOpenHandler: (details: { url: string }) => { action: string };
+
+    beforeEach(() => {
+      windowOpenHandler = mockBrowserWindow.webContents.setWindowOpenHandler.mock.calls.at(-1)?.[0];
+    });
+
+    it('should open web URLs in the system browser', () => {
+      expect(windowOpenHandler).toBeDefined();
+
+      expect(windowOpenHandler({ url: 'https://github.com/lobehub/lobehub' })).toEqual({
+        action: 'deny',
+      });
+      expect(mockShell.openExternal).toHaveBeenCalledWith('https://github.com/lobehub/lobehub');
+    });
+
+    it('should deny renderer-origin URLs instead of handing them to the OS', () => {
+      expect(windowOpenHandler({ url: 'app://renderer/verify/run-1' })).toEqual({
+        action: 'deny',
+      });
       expect(mockShell.openExternal).not.toHaveBeenCalled();
     });
   });

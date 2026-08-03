@@ -18,12 +18,13 @@ import {
 import type { ReactNode } from 'react';
 import { useCallback, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useLocation, useParams } from 'react-router-dom';
+import { useLocation, useParams } from 'react-router';
 
 import { useAuthorInfo } from '@/business/client/hooks/useAuthorInfo';
 import { openRenameModal } from '@/components/RenameModal';
 import { DOCUMENT_HISTORY_QUERY_LIST_LIMIT } from '@/const/documentHistory';
 import { isDesktop } from '@/const/version';
+import { confirmRemoveTopic } from '@/features/DeleteTopicConfirm';
 import { openDocumentCompareModal } from '@/features/PageEditor/History/CompareModal';
 import { formatHistoryAbsoluteTime } from '@/features/PageEditor/History/formatHistoryDate';
 import type {
@@ -64,7 +65,7 @@ const TopicInfoHeader = ({ authorName, title, updatedAtLabel }: TopicInfoHeaderP
   </Block>
 );
 
-export const useMenu = (): { menuHeader?: ReactNode; menuItems: DropdownItem[] } => {
+export const useMenu = (): { menuHeader?: ReactNode; menuItems: () => DropdownItem[] } => {
   const { t } = useTranslation(['chat', 'topic', 'common', 'file']);
   const { message } = App.useApp();
   const { pathname } = useLocation();
@@ -208,7 +209,7 @@ export const useMenu = (): { menuHeader?: ReactNode; menuItems: DropdownItem[] }
     );
   }, [activeTopic?.updatedAt, authorInfo?.fullName, topicId, t]);
 
-  const menuItems = useMemo<DropdownItem[]>(() => {
+  const menuItems = useCallback((): DropdownItem[] => {
     const items: DropdownItem[] = [];
 
     if (topicId) {
@@ -317,15 +318,11 @@ export const useMenu = (): { menuHeader?: ReactNode; menuItems: DropdownItem[] }
           key: 'delete',
           label: t('delete', { ns: 'common' }),
           onClick: () => {
-            confirmModal({
-              cancelText: t('cancel', { ns: 'common' }),
-              content: t('actions.confirmRemoveTopic', { ns: 'topic' }),
-              okButtonProps: { danger: true },
-              okText: t('delete', { ns: 'common' }),
-              onOk: async () => {
-                await removeTopic(topicId);
+            void confirmRemoveTopic({
+              onConfirm: async (removeFiles) => {
+                await removeTopic(topicId, removeFiles);
               },
-              title: t('delete', { ns: 'common' }),
+              topicIds: [topicId],
             });
           },
         },

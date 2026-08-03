@@ -1,5 +1,4 @@
 import { Plans } from '@lobechat/types';
-import { isRecord } from '@lobechat/utils';
 
 export type PlanLimitPricingBasis = 'approximate' | 'estimated' | 'exact' | 'unknown';
 
@@ -19,16 +18,9 @@ export interface PlanLimitBudgetContext {
 export const getBudgetContextFromErrorBody = (
   body: unknown,
 ): PlanLimitBudgetContext | undefined => {
-  if (!isRecord(body)) return undefined;
-
-  const { budget } = body as { budget?: unknown };
-  if (!isRecord(budget)) return undefined;
-
-  return budget as PlanLimitBudgetContext;
+  const budget = (body as { budget?: PlanLimitBudgetContext } | null | undefined)?.budget;
+  return budget && typeof budget === 'object' ? budget : undefined;
 };
-
-export const isFableCampaignLimitContext = (context?: PlanLimitBudgetContext): boolean =>
-  context?.modelId === 'claude-fable-5' && context.providerId === 'lobehub';
 
 const PLAN_VALUES = new Set<string>(Object.values(Plans));
 

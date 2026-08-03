@@ -113,13 +113,13 @@ describe('RecentModel', () => {
         });
       });
 
-      it('orders topic rows by latest message activity', async () => {
+      it('orders topic rows by topic updatedAt even when messages are newer', async () => {
         await serverDB.insert(agents).values({ id: 'agent-activity', userId, virtual: false });
         await serverDB.insert(topics).values([
           {
             agentId: 'agent-activity',
             id: 'topic-old-row-latest-message',
-            title: 'latest message wins',
+            title: 'latest message is ignored',
             updatedAt: minutesAgo(30),
             userId,
           },
@@ -142,8 +142,8 @@ describe('RecentModel', () => {
         const result = await recentModel.queryRecent();
 
         expect(result.map((row) => row.id)).toEqual([
-          'topic-old-row-latest-message',
           'topic-new-row-old-message',
+          'topic-old-row-latest-message',
         ]);
         expect(result[0].updatedAt.getTime()).toBeGreaterThan(result[1].updatedAt.getTime());
       });
@@ -535,6 +535,9 @@ describe('RecentModel', () => {
           'document:doc-1',
           'topic:topic-1',
         ]);
+
+        const topicsOnly = await recentModel.queryRecent(10, ['topic']);
+        expect(topicsOnly.map((r) => `${r.type}:${r.id}`)).toEqual(['topic:topic-1']);
       });
 
       it('respects the limit parameter', async () => {
@@ -552,6 +555,58 @@ describe('RecentModel', () => {
         const result = await recentModel.queryRecent(2);
         expect(result).toHaveLength(2);
         expect(result.map((r) => r.id)).toEqual(['topic-0', 'topic-1']);
+      });
+
+      it('applies the limit after excluding inbox topics and returns rich topic previews', async () => {
+        await serverDB.insert(agents).values({ id: 'agent-inbox', userId, slug: 'inbox' });
+        await serverDB.insert(topics).values([
+          {
+            agentId: 'agent-inbox',
+            id: 'topic-running',
+            status: 'running',
+            updatedAt: minutesAgo(1),
+            userId,
+          },
+          {
+            agentId: 'agent-inbox',
+            id: 'topic-unread',
+            status: 'unread',
+            updatedAt: minutesAgo(2),
+            userId,
+          },
+          {
+            agentId: 'agent-inbox',
+            description: 'Topic description',
+            id: 'topic-recent-description',
+            status: 'active',
+            updatedAt: minutesAgo(3),
+            userId,
+          },
+          {
+            agentId: 'agent-inbox',
+            id: 'topic-recent-answer',
+            status: 'active',
+            updatedAt: minutesAgo(4),
+            userId,
+          },
+        ]);
+        await serverDB.insert(messages).values({
+          agentId: 'agent-inbox',
+          content: 'Last assistant answer',
+          id: 'recent-preview-message',
+          role: 'assistant',
+          topicId: 'topic-recent-answer',
+          userId,
+        });
+
+        const result = await recentModel.queryRecent(2, ['topic'], true);
+
+        expect(result.map((row) => row.id)).toEqual([
+          'topic-recent-description',
+          'topic-recent-answer',
+        ]);
+        expect(result[0].description).toBe('Topic description');
+        expect(result[1].lastAssistantMessage).toBe('Last assistant answer');
       });
 
       it('returns Date objects for updatedAt', async () => {

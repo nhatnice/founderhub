@@ -1,11 +1,13 @@
 'use client';
 
-import { Alert, Button, Flexbox, Icon } from '@lobehub/ui';
+import { Alert, Flexbox, Icon } from '@lobehub/ui';
+import { Button } from '@lobehub/ui/base-ui';
 import { Divider } from 'antd';
 import isEqual from 'fast-deep-equal';
 import { InfoIcon, PlayIcon } from 'lucide-react';
 import React, { memo, useCallback, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useParams } from 'react-router';
 import urlJoin from 'url-join';
 
 import { EditorCanvas } from '@/features/EditorCanvas';
@@ -37,9 +39,16 @@ const MemberProfile = memo(() => {
   const config = useAgentStore(agentByIdSelectors.getAgentConfigById(agentId), isEqual);
   const updateAgentConfigById = useAgentStore((s) => s.updateAgentConfigById);
 
+  const { gid } = useParams<{ gid: string }>();
   const groupId = useAgentGroupStore(agentGroupSelectors.activeGroupId);
-  const currentGroup = useAgentGroupStore(agentGroupSelectors.currentGroup, isEqual);
-  const currentGroupAgents = useAgentGroupStore(agentGroupSelectors.currentGroupAgents, isEqual);
+  const currentGroup = useAgentGroupStore(
+    (s) => agentGroupSelectors.getGroupById(gid ?? '')(s),
+    isEqual,
+  );
+  const currentGroupAgents = useAgentGroupStore(
+    (s) => agentGroupSelectors.getGroupAgents(gid ?? '')(s),
+    isEqual,
+  );
   const router = useQueryRoute();
 
   // Check if the current agent is the supervisor

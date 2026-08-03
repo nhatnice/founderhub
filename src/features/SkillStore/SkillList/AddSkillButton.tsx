@@ -1,4 +1,5 @@
-import { Button, DropdownMenu, Flexbox, Icon, Text } from '@lobehub/ui';
+import { DropdownMenu, Flexbox, Icon, Text } from '@lobehub/ui';
+import { Button } from '@lobehub/ui/base-ui';
 import { GithubIcon } from '@lobehub/ui/icons';
 import { ChevronDown, FileArchive, Grid2x2Plus, Link, PenLine } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
@@ -7,9 +8,9 @@ import { useTranslation } from 'react-i18next';
 import { CustomConnectorModal } from '@/features/Connectors';
 import { usePermission } from '@/hooks/usePermission';
 
-import ImportFromGithubModal from './ImportFromGithubModal';
-import ImportFromUrlModal from './ImportFromUrlModal';
-import UploadSkillModal from './UploadSkillModal';
+import { openImportFromGithubModal } from './ImportFromGithubModal';
+import { openImportFromUrlModal } from './ImportFromUrlModal';
+import { openUploadSkillModal } from './UploadSkillModal';
 
 const MenuLabel = ({ desc, title }: { desc: string; title: ReactNode }) => (
   <Flexbox gap={2}>
@@ -23,9 +24,6 @@ const MenuLabel = ({ desc, title }: { desc: string; title: ReactNode }) => (
 const AddSkillButton = () => {
   const { t } = useTranslation('setting');
   const [showMcpModal, setMcpModal] = useState(false);
-  const [showUrlModal, setUrlModal] = useState(false);
-  const [showGithubModal, setGithubModal] = useState(false);
-  const [showUploadModal, setUploadModal] = useState(false);
   const { allowed: canCreate } = usePermission('create_content');
   const { allowed: canEdit } = usePermission('edit_own_content');
 
@@ -36,9 +34,6 @@ const AddSkillButton = () => {
       }}
     >
       <CustomConnectorModal open={showMcpModal} onClose={() => setMcpModal(false)} />
-      <ImportFromUrlModal open={showUrlModal} onOpenChange={setUrlModal} />
-      <ImportFromGithubModal open={showGithubModal} onOpenChange={setGithubModal} />
-      <UploadSkillModal open={showUploadModal} onOpenChange={setUploadModal} />
       <DropdownMenu
         nativeButton={false}
         placement="bottomRight"
@@ -50,7 +45,7 @@ const AddSkillButton = () => {
             label: <MenuLabel desc={t('tab.importFromUrl.desc')} title={t('tab.importFromUrl')} />,
             onClick: () => {
               if (!canCreate) return;
-              setUrlModal(true);
+              openImportFromUrlModal();
             },
           },
           {
@@ -62,7 +57,7 @@ const AddSkillButton = () => {
             ),
             onClick: () => {
               if (!canCreate) return;
-              setGithubModal(true);
+              openImportFromGithubModal();
             },
           },
           {
@@ -72,7 +67,7 @@ const AddSkillButton = () => {
             label: <MenuLabel desc={t('tab.uploadZip.desc')} title={t('tab.uploadZip')} />,
             onClick: () => {
               if (!canCreate) return;
-              setUploadModal(true);
+              openUploadSkillModal();
             },
           },
           { type: 'divider' as const },

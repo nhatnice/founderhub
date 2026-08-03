@@ -20,8 +20,6 @@ import {
   ClockIcon,
   CoinsIcon,
   ExternalLink,
-  Eye,
-  EyeOff,
   GitForkIcon,
   MoreVerticalIcon,
   Pencil,
@@ -31,6 +29,7 @@ import { memo, useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import urlJoin from 'url-join';
 
+import { useActiveWorkspaceId } from '@/business/client/hooks/useActiveWorkspaceId';
 import PublishedTime from '@/components/PublishedTime';
 import { useWorkspaceAwareNavigate } from '@/features/Workspace/useWorkspaceAwareNavigate';
 import WorkspaceLink from '@/features/Workspace/WorkspaceLink';
@@ -141,6 +140,7 @@ const UserAgentCard = memo<UserAgentCardProps>(
     const { isOwner, onStatusChange } = useUserDetailContext();
     const { allowed: canCreate } = usePermission('create_content');
     const { allowed: canEdit } = usePermission('edit_own_content');
+    const activeWorkspaceId = useActiveWorkspaceId();
 
     const [, setIsEditLoading] = useState(false);
     const createAgent = useAgentStore((s) => s.createAgent);
@@ -154,10 +154,7 @@ const UserAgentCard = memo<UserAgentCardProps>(
       { skipNull: true },
     );
 
-    const isPublished = status === 'published';
-    // Agents under review can't be self-managed — publishing is approval-gated and
-    // the market rejects manual publish with `forbidden`. Show a view-only card
-    // (no owner action menu) until the agent has been validated.
+    // Under-review agents stay view-only until the agent has been validated.
     const isUnderReview = isValidated === false;
 
     const handleViewDetail = useCallback(() => {
@@ -186,7 +183,9 @@ const UserAgentCard = memo<UserAgentCardProps>(
             return;
           }
 
-          // Create local agent with market data
+          // Create local agent with market data. In workspace mode default
+          // the install to the user's Private bucket so a community card
+          // they're just trying out doesn't immediately surface to teammates.
           const result = await createAgent({
             config: {
               ...marketAgent.config,
@@ -198,6 +197,7 @@ const UserAgentCard = memo<UserAgentCardProps>(
               tags: marketAgent.tags,
               title: marketAgent.title,
             },
+            ...(activeWorkspaceId ? { visibility: 'private' as const } : {}),
           });
 
           await refreshAgentList();
@@ -215,7 +215,7 @@ const UserAgentCard = memo<UserAgentCardProps>(
     }, [canCreate, canEdit, identifier, navigate, createAgent, refreshAgentList, message, t]);
 
     const handleStatusAction = useCallback(
-      (action: 'publish' | 'unpublish' | 'deprecate') => {
+      (action: 'deprecate') => {
         if (!canEdit) return;
         onStatusChange?.(identifier, action);
       },
@@ -239,15 +239,6 @@ const UserAgentCard = memo<UserAgentCardProps>(
           },
           {
             type: 'divider' as const,
-          },
-          {
-            disabled: !canEdit,
-            icon: <Icon icon={isPublished ? EyeOff : Eye} />,
-            key: 'togglePublish',
-            label: isPublished
-              ? t('setting:myAgents.actions.unpublish')
-              : t('setting:myAgents.actions.publish'),
-            onClick: () => handleStatusAction(isPublished ? 'unpublish' : 'publish'),
           },
           {
             danger: true,

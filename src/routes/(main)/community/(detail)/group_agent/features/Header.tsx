@@ -1,16 +1,7 @@
 'use client';
 
-import {
-  ActionIcon,
-  Avatar,
-  Button,
-  Flexbox,
-  Icon,
-  Tag,
-  Text,
-  Tooltip,
-  TooltipGroup,
-} from '@lobehub/ui';
+import { ActionIcon, Avatar, Flexbox, Icon, Tag, Text, Tooltip, TooltipGroup } from '@lobehub/ui';
+import { Button } from '@lobehub/ui/base-ui';
 import { App } from 'antd';
 import { createStaticStyles, cssVar, useResponsive } from 'antd-style';
 import { BookmarkCheckIcon, BookmarkIcon, DotIcon, GitBranchIcon, UsersIcon } from 'lucide-react';
@@ -22,6 +13,7 @@ import useSWR from 'swr';
 import PublishedTime from '@/components/PublishedTime';
 import WorkspaceLink from '@/features/Workspace/WorkspaceLink';
 import { useMarketAuth } from '@/layout/AuthProvider/MarketAuth';
+import { favoriteKeys } from '@/libs/swr/keys';
 import { socialService } from '@/services/social';
 
 import { resolveCommunityProfileLink } from '../../utils/profileLink';
@@ -67,7 +59,7 @@ const Header = memo<{ mobile?: boolean }>(({ mobile: isMobile }) => {
   // TODO: Use 'group_agent' type when social service supports it
   // Fetch favorite status
   const { data: favoriteStatus, mutate: mutateFavorite } = useSWR(
-    identifier && isAuthenticated ? ['favorite-status', 'agent', identifier] : null,
+    identifier && isAuthenticated ? favoriteKeys.status('agent', identifier) : null,
     () => socialService.checkFavoriteStatus('agent-group', identifier!),
     { revalidateOnFocus: false },
   );
@@ -106,9 +98,7 @@ const Header = memo<{ mobile?: boolean }>(({ mobile: isMobile }) => {
         url: '/community/group_agent',
       })}
     >
-      <Button size={'middle'} variant={'outlined'}>
-        {category}
-      </Button>
+      <Button size={'middle'}>{category}</Button>
     </WorkspaceLink>
   ) : null;
 

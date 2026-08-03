@@ -9,11 +9,13 @@ import { memo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { FORM_STYLE } from '@/const/layoutTokens';
+import { serviceModelFormStyles } from '@/features/ServiceModel/styles';
+import { SettingsSearchAnchor } from '@/features/SettingsSearch/anchor';
 import { usePermission } from '@/hooks/usePermission';
 import { useUserStore } from '@/store/user';
 import { settingsSelectors } from '@/store/user/selectors';
 
-import { opeanaiSTTOptions, opeanaiTTSOptions } from './const';
+import { opeanaiTTSOptions } from './const';
 
 const OpenAI = memo(() => {
   const { t } = useTranslation('setting');
@@ -28,30 +30,22 @@ const OpenAI = memo(() => {
   const openai: FormGroupItemType = {
     children: [
       {
+        className: serviceModelFormStyles.centeredLabel,
         children: (
           <Tooltip title={reason}>
             <Select
               disabled={!canManageServiceModel}
               options={opeanaiTTSOptions}
-              style={{ width: 448 }}
+              style={{ width: 'min(100%, 448px)' }}
             />
           </Tooltip>
         ),
-        label: t('settingTTS.openai.ttsModel'),
+        label: (
+          <SettingsSearchAnchor id={'service-model-tts'}>
+            {t('settingTTS.openai.ttsModel')}
+          </SettingsSearchAnchor>
+        ),
         name: ['openAI', 'ttsModel'],
-      },
-      {
-        children: (
-          <Tooltip title={reason}>
-            <Select
-              disabled={!canManageServiceModel}
-              options={opeanaiSTTOptions}
-              style={{ width: 448 }}
-            />
-          </Tooltip>
-        ),
-        label: t('settingTTS.openai.sttModel'),
-        name: ['openAI', 'sttModel'],
       },
     ],
     extra: loading && <Icon spin icon={Loader2Icon} size={16} style={{ opacity: 0.5 }} />,

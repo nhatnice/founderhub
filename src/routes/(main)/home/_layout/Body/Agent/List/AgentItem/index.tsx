@@ -1,6 +1,5 @@
-import { HETEROGENEOUS_TYPE_LABELS } from '@lobechat/heterogeneous-agents';
 import { type SidebarAgentItem } from '@lobechat/types';
-import { ActionIcon, Flexbox, Icon, Tag } from '@lobehub/ui';
+import { ActionIcon, Icon } from '@lobehub/ui';
 import { createStaticStyles, cssVar } from 'antd-style';
 import { Loader2, PinIcon } from 'lucide-react';
 import { type CSSProperties, type DragEvent } from 'react';
@@ -80,7 +79,11 @@ interface AgentItemProps {
 }
 
 const AgentItem = memo<AgentItemProps>(({ item, style, className, onNavigate }) => {
-  const { id, avatar, backgroundColor, title, pinned, heterogeneousType } = item;
+  const { id, avatar, backgroundColor, title, pinned, slug, userId, visibility } = item;
+  // Unread count is server-computed (topics.status === 'unread') and carried on
+  // the sidebar list item, so it stays accurate across agents whose topics
+  // aren't loaded into the chat store on this client.
+  const unreadCount = item.unreadCount ?? 0;
   const { t } = useTranslation('chat');
   const { openCreateGroupModal } = useAgentModal();
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
@@ -90,30 +93,10 @@ const AgentItem = memo<AgentItemProps>(({ item, style, className, onNavigate }) 
   const isUpdating = useHomeStore((s) => s.agentUpdatingId === id);
 
   // Separate loading state from chat store - only show loading for this specific agent
-  const isLoading = useChatStore(operationSelectors.isAgentRunning(id));
-  const unreadCount = useChatStore(operationSelectors.agentUnreadCount(id));
+  const isLoading = useChatStore(operationSelectors.isAgentVisiblyRunning(id));
 
   // Get display title with fallback
   const displayTitle = title || t('untitledAgent');
-
-  // Heterogeneous agents (Claude Code, Codex, …) show their runtime as a tag
-  // so they stand out from built-in agents in the sidebar.
-  const heterogeneousLabel = heterogeneousType
-    ? (HETEROGENEOUS_TYPE_LABELS[heterogeneousType] ?? heterogeneousType)
-    : null;
-
-  const titleNode = heterogeneousLabel ? (
-    <Flexbox horizontal align="center" gap={4}>
-      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-        {displayTitle}
-      </span>
-      <Tag size="small" style={{ flexShrink: 0 }}>
-        {heterogeneousLabel}
-      </Tag>
-    </Flexbox>
-  ) : (
-    displayTitle
-  );
 
   const agentUrl = usePreservedAgentUrl(id);
 
@@ -143,8 +126,8 @@ const AgentItem = memo<AgentItemProps>(({ item, style, className, onNavigate }) 
   );
 
   const handleOpenCreateGroupModal = useCallback(() => {
-    openCreateGroupModal(id);
-  }, [id, openCreateGroupModal]);
+    openCreateGroupModal(id, visibility);
+  }, [id, openCreateGroupModal, visibility]);
 
   // Memoize pin icon
   const pinIcon = useMemo(
@@ -194,11 +177,15 @@ const AgentItem = memo<AgentItemProps>(({ item, style, className, onNavigate }) 
   const dropdownMenu = useAgentDropdownMenu({
     anchor,
     avatar: typeof avatar === 'string' ? avatar : undefined,
+    backgroundColor: backgroundColor || undefined,
     group: undefined, // TODO: pass group from parent if needed
     id,
     openCreateGroupModal: handleOpenCreateGroupModal,
     pinned: pinned ?? false,
+    slug,
     title: displayTitle,
+    userId,
+    visibility,
   });
 
   return (
@@ -219,7 +206,7 @@ const AgentItem = memo<AgentItemProps>(({ item, style, className, onNavigate }) 
         icon={avatarIcon}
         key={id}
         style={style}
-        title={titleNode}
+        title={displayTitle}
         onDoubleClick={handleDoubleClick}
         onDragEnd={handleDragEnd}
         onDragStart={handleDragStart}

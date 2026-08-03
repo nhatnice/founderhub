@@ -1,18 +1,26 @@
-import { isDesktop } from '@lobechat/const';
-import { HETEROGENEOUS_AGENT_CLIENT_CONFIGS } from '@lobechat/heterogeneous-agents/client';
-import { Icon } from '@lobehub/ui';
+import type { SFSymbol } from '@lobechat/electron-client-ipc';
+import { Flexbox, Icon, Text } from '@lobehub/ui';
 import { GroupBotSquareIcon } from '@lobehub/ui/icons';
 import { App } from 'antd';
 import type { ItemType } from 'antd/es/menu/interface';
-import { BotIcon, FileTextIcon, FolderCogIcon, FolderPlus, MonitorSmartphone } from 'lucide-react';
+import {
+  BotIcon,
+  FileTextIcon,
+  FolderCogIcon,
+  FolderPlus,
+  ListPlusIcon,
+  MonitorSmartphone,
+  Store,
+} from 'lucide-react';
 import { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import useSWRMutation from 'swr/mutation';
 
+import { useActiveWorkspaceId } from '@/business/client/hooks/useActiveWorkspaceId';
 import { useGroupTemplates } from '@/components/ChatGroupWizard/templates';
 import { DEFAULT_CHAT_GROUP_CHAT_CONFIG } from '@/const/settings';
+import { openConnectAgentModal } from '@/features/ConnectAgent';
 import { useWorkspaceAwareNavigate } from '@/features/Workspace/useWorkspaceAwareNavigate';
-import { useCreateHeteroAgent } from '@/hooks/useCreateHeteroAgent';
 import { usePermission } from '@/hooks/usePermission';
 import { useOptionalAgentModal } from '@/routes/(main)/home/_layout/Body/Agent/ModalProvider';
 import type { CreateAgentParams } from '@/services/agent';
@@ -22,24 +30,31 @@ import { useAgentStore } from '@/store/agent';
 import { useAgentGroupStore } from '@/store/agentGroup';
 import { useHomeStore } from '@/store/home';
 import { usePageStore } from '@/store/page';
-import { useUserStore } from '@/store/user';
-import { labPreferSelectors } from '@/store/user/selectors';
+
+type MenuItem = NonNullable<ItemType> & { sfSymbol?: SFSymbol };
 
 interface CreateAgentOptions {
   groupId?: string;
   isPinned?: boolean;
   onSuccess?: () => void;
+  /**
+   * Forwarded to the server-side `visibility` column. Used by the sidebar's
+   * "Create Private …" entries; defaults to undefined which the server reads
+   * as `'public'`. Has no effect in personal mode.
+   */
+  visibility?: 'private' | 'public';
 }
 
 /**
  * Hook for generating menu items for top-level create actions
- * Used in Body/Agent/Actions.tsx and Header/AddButton.tsx
+ * Used by the home sidebar create menus.
  */
 export const useCreateMenuItems = () => {
   const { t } = useTranslation('chat');
   const { t: tFile } = useTranslation('file');
   const { message } = App.useApp();
   const navigate = useWorkspaceAwareNavigate();
+  const activeWorkspaceId = useActiveWorkspaceId();
   const groupTemplates = useGroupTemplates();
   const { allowed: canCreate } = usePermission('create_content');
 
@@ -51,7 +66,6 @@ export const useCreateMenuItems = () => {
   ]);
   const [createGroup, loadGroups] = useAgentGroupStore((s) => [s.createGroup, s.loadGroups]);
   const createNewPage = usePageStore((s) => s.createNewPage);
-  const createHeterogeneousAgent = useCreateHeteroAgent();
 
   const [isCreatingGroup, setIsCreatingGroup] = useState(false);
   const [isCreatingSessionGroup, setIsCreatingSessionGroup] = useState(false);
@@ -80,6 +94,9 @@ export const useCreateMenuItems = () => {
           config: DEFAULT_CHAT_GROUP_CHAT_CONFIG,
           groupId: arg?.groupId,
           title: arg?.title || t('defaultGroupChat'),
+          // Forward the caller's bucket choice — without it a "Create Private
+          // Group" entry silently lands the group in the public bucket.
+          ...(arg?.visibility ? { visibility: arg.visibility } : {}),
         },
         [],
         true, // silent mode - don't switch session, we'll navigate instead
@@ -103,7 +120,11 @@ export const useCreateMenuItems = () => {
       if (!canCreate) return;
 
       const config = options?.prompt ? { systemRole: options.prompt } : undefined;
-      await mutateAgent({ config, groupId: options?.groupId });
+      await mutateAgent({
+        config,
+        groupId: options?.groupId,
+        visibility: options?.visibility,
+      });
       options?.onSuccess?.();
     },
     [canCreate, mutateAgent],
@@ -210,23 +231,29 @@ export const useCreateMenuItems = () => {
 
   const agentModal = useOptionalAgentModal();
   const openCreateModal = agentModal?.openCreateModal;
-  const enablePlatformAgent = useUserStore(labPreferSelectors.enablePlatformAgent);
+  const openCreateGroupModal = agentModal?.openCreateGroupModal;
 
   /**
    * Create agent menu item
    */
   const createAgentMenuItem = useCallback(
-    (options?: CreateAgentOptions): ItemType => ({
+    (options?: CreateAgentOptions): MenuItem => ({
       icon: <Icon icon={BotIcon} />,
       disabled: !canCreate,
-      key: 'newAgent',
+      // Key needs to vary by visibility so the public and private "New
+      // Agent" entries can coexist (e.g. if a future menu lists both).
+      key: options?.visibility === 'private' ? 'newPrivateAgent' : 'newAgent',
       label: t('newAgent'),
+      sfSymbol: 'plus.bubble',
       onClick: async (info) => {
         info.domEvent?.stopPropagation();
         if (!canCreate) return;
 
         if (openCreateModal) {
-          openCreateModal('agent', options?.groupId ? { groupId: options.groupId } : undefined);
+          openCreateModal('agent', {
+            ...(options?.groupId ? { groupId: options.groupId } : {}),
+            ...(options?.visibility ? { visibility: options.visibility } : {}),
+          });
         } else {
           await createAgent(options);
         }
@@ -236,52 +263,75 @@ export const useCreateMenuItems = () => {
   );
 
   /**
-   * Create heterogeneous agent menu items (Desktop only)
+   * Add market agent menu item
    */
-  const createHeterogeneousAgentMenuItems = useCallback(
-    (options?: CreateAgentOptions): ItemType[] => {
-      if (!isDesktop) return [];
+  const createMarketAgentMenuItem = useCallback(
+    (): MenuItem => ({
+      icon: <Icon icon={Store} />,
+      disabled: !canCreate,
+      key: 'addAgentFromMarket',
+      label: t('addAgentFromMarket'),
+      sfSymbol: 'bag',
+      onClick: (info) => {
+        info.domEvent?.stopPropagation();
+        if (!canCreate) return;
 
-      return HETEROGENEOUS_AGENT_CLIENT_CONFIGS.map((definition) => {
-        const AgentIcon = definition.icon;
-
-        return {
-          icon: <AgentIcon size={'1em'} />,
-          disabled: !canCreate,
-          key: definition.menuKey,
-          label: t(definition.menuLabelKey),
-          onClick: async (info) => {
-            info.domEvent?.stopPropagation();
-            if (!canCreate) return;
-
-            await createHeterogeneousAgent(definition, options);
-          },
-        };
-      });
-    },
-    [canCreate, t, createHeterogeneousAgent],
+        navigate('/community/agent');
+      },
+    }),
+    [canCreate, navigate, t],
   );
 
   /**
-   * Create platform agent menu item (openclaw / hermes — remote device agents)
-   * Opens the 3-step creation modal
+   * Open the complete Agent list, where shared Agents can be added to the
+   * caller's sidebar without mutating the Agent itself.
    */
-  const createPlatformAgentMenuItem = useCallback(
-    (options?: CreateAgentOptions): ItemType => {
-      if (!enablePlatformAgent) return null;
+  const createAgentListMenuItem = useCallback(
+    (options?: { visibility?: 'private' | 'public' }): MenuItem => ({
+      icon: <Icon icon={ListPlusIcon} />,
+      key: options?.visibility === 'private' ? 'addPrivateAgentFromList' : 'addAgentFromList',
+      label: t('addAgentFromList'),
+      sfSymbol: 'list.bullet',
+      onClick: (info) => {
+        info.domEvent?.stopPropagation();
+        // Land the view-all page on the tab matching the caller's bucket.
+        navigate(options?.visibility === 'private' ? '/agents?tab=private' : '/agents');
+      },
+    }),
+    [navigate, t],
+  );
+
+  /**
+   * Connect Agent menu item — the unified device-first wizard for external
+   * agents installed on a local or connected machine.
+   */
+  const createConnectAgentMenuItem = useCallback(
+    (options?: CreateAgentOptions): MenuItem | null => {
       return {
         icon: <Icon icon={MonitorSmartphone} />,
+        disabled: !canCreate,
         key: 'newPlatformAgent',
-        label: t('newPlatformAgent'),
+        label: (
+          <Flexbox gap={1}>
+            <Text>{t('newPlatformAgent')}</Text>
+            <Text fontSize={12} type={'secondary'}>
+              {t('newPlatformAgentDesc')}
+            </Text>
+          </Flexbox>
+        ),
+        sfSymbol: 'laptopcomputer.and.iphone',
         onClick: (info) => {
           info.domEvent?.stopPropagation();
-          agentModal?.openCreatePlatformAgentModal(
-            options?.groupId ? { groupId: options.groupId } : undefined,
+          if (!canCreate) return;
+          openConnectAgentModal(
+            options?.groupId || options?.visibility
+              ? { groupId: options?.groupId, visibility: options?.visibility }
+              : undefined,
           );
         },
       };
     },
-    [t, agentModal, enablePlatformAgent],
+    [t, canCreate],
   );
 
   /**
@@ -289,17 +339,21 @@ export const useCreateMenuItems = () => {
    * Creates an empty group and navigates to its profile page
    */
   const createGroupChatMenuItem = useCallback(
-    (options?: CreateAgentOptions): ItemType => ({
+    (options?: CreateAgentOptions): MenuItem => ({
       icon: <Icon icon={GroupBotSquareIcon} />,
       disabled: !canCreate,
-      key: 'newGroupChat',
+      key: options?.visibility === 'private' ? 'newPrivateGroupChat' : 'newGroupChat',
       label: t('newGroupChat'),
+      sfSymbol: 'person.2',
       onClick: async (info) => {
         info.domEvent?.stopPropagation();
         if (!canCreate) return;
 
         if (openCreateModal) {
-          openCreateModal('group', options?.groupId ? { groupId: options.groupId } : undefined);
+          openCreateModal('group', {
+            ...(options?.groupId ? { groupId: options.groupId } : {}),
+            ...(options?.visibility ? { visibility: options.visibility } : {}),
+          });
         } else {
           await createEmptyGroup(options);
         }
@@ -312,31 +366,39 @@ export const useCreateMenuItems = () => {
    * Add session group menu item
    */
   const createSessionGroupMenuItem = useCallback(
-    (): ItemType => ({
+    (options?: { visibility?: 'private' | 'public' }): MenuItem => ({
       icon: <Icon icon={FolderPlus} />,
       disabled: !canCreate,
-      key: 'addSessionGroup',
+      key: options?.visibility === 'private' ? 'addPrivateSessionGroup' : 'addSessionGroup',
       label: t('sessionGroup.createGroup'),
+      sfSymbol: 'folder.badge.plus',
       onClick: async (info) => {
         info.domEvent?.stopPropagation();
         if (!canCreate) return;
 
+        if (openCreateGroupModal) {
+          // Let the user name the group at creation time (LOBE-12597)
+          openCreateGroupModal(undefined, options?.visibility);
+          return;
+        }
+
         setIsCreatingSessionGroup(true);
-        await addGroup(t('sessionGroup.newGroup'));
+        await addGroup(t('sessionGroup.newGroup'), options?.visibility);
         setIsCreatingSessionGroup(false);
       },
     }),
-    [canCreate, t, addGroup],
+    [canCreate, t, addGroup, openCreateGroupModal],
   );
 
   /**
    * Config menu item
    */
   const configMenuItem = useCallback(
-    (onOpenConfig: () => void): ItemType => ({
+    (onOpenConfig: () => void): MenuItem => ({
       icon: <Icon icon={FolderCogIcon} />,
       key: 'config',
-      label: t('sessionGroup.config'),
+      label: t('sessionGroup.manageCategory'),
+      sfSymbol: 'folder.badge.gearshape',
       onClick: (info) => {
         info.domEvent?.stopPropagation();
         onOpenConfig();
@@ -353,23 +415,28 @@ export const useCreateMenuItems = () => {
 
     const untitledTitle = tFile('pageList.untitled');
     try {
-      const newPageId = await createNewPage(untitledTitle);
+      // In workspace mode the server auto-defaults top-level `sourceType: 'api'`
+      // rows to `'private'`; pass it explicitly so the optimistic row lands in
+      // 私人 too, instead of flashing in 工作区 and jumping when the server replies.
+      const defaultVisibility = activeWorkspaceId ? 'private' : undefined;
+      const newPageId = await createNewPage(untitledTitle, defaultVisibility);
       navigate(`/page/${newPageId}`);
     } catch (error) {
       console.error('Failed to create page:', error);
       message.error('Failed to create page');
     }
-  }, [canCreate, createNewPage, tFile, navigate, message]);
+  }, [canCreate, createNewPage, tFile, navigate, message, activeWorkspaceId]);
 
   /**
    * Create page menu item
    */
   const createPageMenuItem = useCallback(
-    (): ItemType => ({
+    (): MenuItem => ({
       icon: <Icon icon={FileTextIcon} />,
       disabled: !canCreate,
       key: 'newPage',
       label: t('newPage'),
+      sfSymbol: 'doc.badge.plus',
       onClick: async (info) => {
         info.domEvent?.stopPropagation();
         if (!canCreate) return;
@@ -380,20 +447,46 @@ export const useCreateMenuItems = () => {
     [canCreate, t, createPage],
   );
 
+  /**
+   * Top-level create menu shown by the Agent section and header add buttons.
+   *
+   * Regression example: the Agent section + menu used to expose only local creation actions,
+   * so users had no visible entry to `/community/agent`.
+   */
+  const createTopLevelMenuItems = useCallback((): ItemType[] => {
+    const connectItem = createConnectAgentMenuItem();
+
+    return [
+      createAgentMenuItem(),
+      createGroupChatMenuItem(),
+      ...(connectItem ? [{ type: 'divider' as const }, connectItem] : []),
+      { type: 'divider' as const },
+      createAgentListMenuItem(),
+      createMarketAgentMenuItem(),
+    ];
+  }, [
+    createAgentListMenuItem,
+    createAgentMenuItem,
+    createConnectAgentMenuItem,
+    createGroupChatMenuItem,
+    createMarketAgentMenuItem,
+  ]);
+
   return {
     configMenuItem,
     createAgent,
+    createAgentListMenuItem,
     createAgentMenuItem,
+    createConnectAgentMenuItem,
     createEmptyGroup,
     createGroupChatMenuItem,
     createGroupFromTemplate,
-    createHeterogeneousAgent,
-    createHeterogeneousAgentMenuItems,
     createGroupWithMembers,
+    createMarketAgentMenuItem,
     createPage,
     createPageMenuItem,
-    createPlatformAgentMenuItem,
     createSessionGroupMenuItem,
+    createTopLevelMenuItems,
     openCreateModal,
 
     // Loading states

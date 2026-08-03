@@ -12,12 +12,13 @@ const mocks = vi.hoisted(() => ({
   params: {} as { aid?: string },
 }));
 
-vi.mock('react-router-dom', () => ({
+vi.mock('react-router', () => ({
   useNavigate: () => mocks.navigate,
   useParams: () => mocks.params,
 }));
 
 vi.mock('@/business/client/hooks/useActiveWorkspaceSlug', () => ({
+  getActiveWorkspaceSlug: () => mocks.activeWorkspaceSlug,
   useActiveWorkspaceSlug: () => mocks.activeWorkspaceSlug,
 }));
 

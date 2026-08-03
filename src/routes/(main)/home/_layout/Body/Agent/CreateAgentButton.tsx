@@ -1,6 +1,7 @@
 'use client';
 
-import { ActionIcon, Block, Center, DropdownMenu, Flexbox, Icon, Text, Tooltip } from '@lobehub/ui';
+import { ActionIcon, Block, Center, Flexbox, Icon, Text, Tooltip } from '@lobehub/ui';
+import { DropdownMenu } from '@lobehub/ui/base-ui';
 import { createStaticStyles, cssVar, cx } from 'antd-style';
 import { ChevronDownIcon, PlusIcon } from 'lucide-react';
 import { memo, useMemo } from 'react';
@@ -40,50 +41,71 @@ const styles = createStaticStyles(({ css }) => ({
 interface CreateAgentButtonProps {
   className?: string;
   groupId?: string;
+  visibility?: 'private' | 'public';
 }
 
-const CreateAgentButton = memo<CreateAgentButtonProps>(({ groupId, className }) => {
+const CreateAgentButton = memo<CreateAgentButtonProps>(({ groupId, className, visibility }) => {
   const { t } = useTranslation('chat');
   const { allowed: canCreate, reason } = usePermission('create_content');
   const {
     createAgent,
+    createAgentListMenuItem,
     createAgentMenuItem,
+    createConnectAgentMenuItem,
     createGroupChatMenuItem,
-    createHeterogeneousAgentMenuItems,
-    createPlatformAgentMenuItem,
+    createMarketAgentMenuItem,
     isMutatingAgent,
     openCreateModal,
   } = useCreateMenuItems();
 
   const isCustomGroup = Boolean(groupId) && groupId !== SessionDefaultGroup.Default;
+  // Always carry visibility so agents created inside a private session group
+  // land in the private bucket (otherwise they default to public and end up
+  // orphaned — invisible in both lists). groupId is only attached for custom
+  // groups so the default list keeps creating top-level agents.
   const menuOptions = useMemo(
-    () => (isCustomGroup ? { groupId } : undefined),
-    [groupId, isCustomGroup],
+    () =>
+      isCustomGroup || visibility
+        ? { ...(isCustomGroup ? { groupId } : {}), ...(visibility ? { visibility } : {}) }
+        : undefined,
+    [groupId, isCustomGroup, visibility],
   );
 
   const dropdownItems = useMemo(() => {
-    const heteroItems = createHeterogeneousAgentMenuItems(menuOptions);
-    const platformItem = createPlatformAgentMenuItem(menuOptions);
+    const connectItem = createConnectAgentMenuItem(menuOptions);
+    // Discovery entries stay available for the private bucket too — they only
+    // navigate (list / market), so the bucket merely decides which tab the
+    // agent-list page opens on.
+    const showDiscoveryItems = !isCustomGroup;
     return [
       createAgentMenuItem(menuOptions),
       createGroupChatMenuItem(menuOptions),
-      ...(heteroItems.length > 0 ? [{ type: 'divider' as const }, ...heteroItems] : []),
-      ...(platformItem ? [{ type: 'divider' as const }, platformItem] : []),
+      ...(connectItem ? [{ type: 'divider' as const }, connectItem] : []),
+      ...(showDiscoveryItems
+        ? [
+            { type: 'divider' as const },
+            createAgentListMenuItem(visibility ? { visibility } : undefined),
+            createMarketAgentMenuItem(),
+          ]
+        : []),
     ];
   }, [
+    createAgentListMenuItem,
     createAgentMenuItem,
+    createConnectAgentMenuItem,
     createGroupChatMenuItem,
-    createHeterogeneousAgentMenuItems,
-    createPlatformAgentMenuItem,
+    createMarketAgentMenuItem,
+    isCustomGroup,
     menuOptions,
+    visibility,
   ]);
 
   const handleClick = () => {
     if (!canCreate) return;
     if (openCreateModal) {
-      openCreateModal('agent', isCustomGroup ? { groupId } : undefined);
+      openCreateModal('agent', menuOptions);
     } else {
-      createAgent(isCustomGroup ? { groupId } : undefined);
+      createAgent(menuOptions);
     }
   };
 
@@ -108,7 +130,7 @@ const CreateAgentButton = memo<CreateAgentButtonProps>(({ groupId, className }) 
         )}
       </Center>
       <Text style={{ flex: 1 }} type={'secondary'}>
-        {t('newAgent')}
+        {t('addAgent')}
       </Text>
       {canCreate && (
         <Flexbox

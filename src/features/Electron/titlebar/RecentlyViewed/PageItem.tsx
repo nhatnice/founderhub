@@ -5,13 +5,13 @@ import { cx } from 'antd-style';
 import { Pin, PinOff } from 'lucide-react';
 import React, { memo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useLocation } from 'react-router-dom';
 
 import { useWorkspaceAwareNavigate } from '@/features/Workspace/useWorkspaceAwareNavigate';
+import { useActiveLocation } from '@/hooks/useActiveLocation';
 import { useElectronStore } from '@/store/electron';
 
 import { type ResolvedTab } from '../TabBar/hooks/useResolvedTabs';
-import { normalizeTabUrl } from '../TabBar/url';
+import { isSameTabTarget } from '../TabBar/scope';
 import { useStyles } from './styles';
 
 interface PageItemProps {
@@ -23,18 +23,18 @@ interface PageItemProps {
 const PageItem = memo<PageItemProps>(({ item, isPinned, onClose }) => {
   const { t } = useTranslation('electron');
   const navigate = useWorkspaceAwareNavigate();
-  const location = useLocation();
+  const location = useActiveLocation();
   const styles = useStyles;
 
   const pinPage = useElectronStore((s) => s.pinPage);
   const unpinPage = useElectronStore((s) => s.unpinPage);
 
   const { meta, tab } = item;
-  const currentId = normalizeTabUrl(location.pathname + location.search);
-  const isActive = tab.id === currentId;
+  const currentUrl = location.pathname + location.search;
+  const isActive = isSameTabTarget(tab, currentUrl);
 
   const handleClick = () => {
-    navigate(tab.url);
+    navigate(tab.url, { escape: true });
     onClose();
   };
 

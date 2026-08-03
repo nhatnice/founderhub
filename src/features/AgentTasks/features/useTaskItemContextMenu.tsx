@@ -1,12 +1,5 @@
 import type { TaskStatus } from '@lobechat/types';
-import {
-  closeContextMenu,
-  type ContextMenuItem,
-  copyToClipboard,
-  type GenericItemType,
-  Icon,
-  type MenuInfo,
-} from '@lobehub/ui';
+import { type ContextMenuItem, copyToClipboard, Icon, type MenuInfo } from '@lobehub/ui';
 import { confirmModal } from '@lobehub/ui/base-ui';
 import { App } from 'antd';
 import { cssVar } from 'antd-style';
@@ -26,6 +19,8 @@ import { useTaskTransferMenuItem } from '@/business/client/hooks/useTaskTransfer
 import { buildWorkspaceAwarePath } from '@/features/Workspace/workspaceAwarePath';
 import { useAppOrigin } from '@/hooks/useAppOrigin';
 import { usePermission } from '@/hooks/usePermission';
+import { closeContextMenu } from '@/libs/contextMenu';
+import type { NativeContextMenuItem } from '@/libs/contextMenu/types';
 import { useAgentStore } from '@/store/agent';
 import { builtinAgentSelectors } from '@/store/agent/selectors';
 import { useTaskStore } from '@/store/task';
@@ -38,9 +33,10 @@ import { STATUS_META, USER_SELECTABLE_STATUSES } from './TaskStatusTag';
 const PRIORITY_LEVELS = [0, 1, 2, 3, 4];
 
 type ActiveSubmenu = 'status' | 'priority' | null;
+type TaskItemRouteScope = 'agent' | 'global';
 
 interface TaskItemContextMenu {
-  items: ContextMenuItem[];
+  items: NativeContextMenuItem[];
   onContextMenu: () => void;
 }
 
@@ -54,11 +50,13 @@ export interface TaskContextMenuTarget {
 const RUN_NOW_STATUSES = new Set<TaskStatus>(['backlog', 'completed']);
 
 export interface TaskContextMenuActions {
-  buildItems: (task: TaskContextMenuTarget) => ContextMenuItem[];
+  buildItems: (task: TaskContextMenuTarget) => NativeContextMenuItem[];
   installKeyboardHandlers: (task: TaskContextMenuTarget) => void;
 }
 
-export const useTaskContextMenuActions = (): TaskContextMenuActions => {
+export const useTaskContextMenuActions = (
+  routeScope: TaskItemRouteScope = 'agent',
+): TaskContextMenuActions => {
   const { t } = useTranslation(['chat', 'common']);
   const { message } = App.useApp();
   const appOrigin = useAppOrigin();
@@ -91,7 +89,7 @@ export const useTaskContextMenuActions = (): TaskContextMenuActions => {
       });
     };
 
-    const buildItems = (task: TaskContextMenuTarget): ContextMenuItem[] => {
+    const buildItems = (task: TaskContextMenuTarget): NativeContextMenuItem[] => {
       const currentStatus = task.status as TaskStatus;
       const currentPriority = task.priority ?? 0;
 
@@ -137,7 +135,10 @@ export const useTaskContextMenuActions = (): TaskContextMenuActions => {
       });
 
       const taskUrl = `${appOrigin}${buildWorkspaceAwarePath(
-        taskDetailPath(task.identifier, task.assigneeAgentId ?? undefined),
+        taskDetailPath(
+          task.identifier,
+          routeScope === 'agent' ? (task.assigneeAgentId ?? undefined) : undefined,
+        ),
         activeWorkspaceSlug,
       )}`;
       const canRunNow = RUN_NOW_STATUSES.has(currentStatus);
@@ -158,9 +159,10 @@ export const useTaskContextMenuActions = (): TaskContextMenuActions => {
                   }
                   await runTask(task.identifier);
                 },
+                sfSymbol: 'play.fill',
               },
               { type: 'divider' },
-            ] satisfies GenericItemType[])
+            ] satisfies NativeContextMenuItem[])
           : []),
         {
           children: statusChildren,
@@ -192,6 +194,7 @@ export const useTaskContextMenuActions = (): TaskContextMenuActions => {
             await copyToClipboard(task.identifier);
             message.success(t('taskList.contextMenu.copyIdSuccess'));
           },
+          sfSymbol: 'doc.on.doc',
         },
         {
           icon: <Icon icon={LinkIcon} />,
@@ -202,6 +205,7 @@ export const useTaskContextMenuActions = (): TaskContextMenuActions => {
             await copyToClipboard(taskUrl);
             message.success(t('taskList.contextMenu.copyLinkSuccess'));
           },
+          sfSymbol: 'doc.on.doc',
         },
         { type: 'divider' },
         {
@@ -215,6 +219,7 @@ export const useTaskContextMenuActions = (): TaskContextMenuActions => {
             if (!canEditTask) return;
             triggerDelete(task.identifier);
           },
+          sfSymbol: 'trash',
         },
       ];
     };
@@ -305,11 +310,15 @@ export const useTaskContextMenuActions = (): TaskContextMenuActions => {
     deleteTask,
     runTask,
     inboxAgentId,
+    routeScope,
   ]);
 };
 
-export const useTaskItemContextMenu = (task: TaskContextMenuTarget): TaskItemContextMenu => {
-  const { buildItems, installKeyboardHandlers } = useTaskContextMenuActions();
+export const useTaskItemContextMenu = (
+  task: TaskContextMenuTarget,
+  routeScope?: TaskItemRouteScope,
+): TaskItemContextMenu => {
+  const { buildItems, installKeyboardHandlers } = useTaskContextMenuActions(routeScope);
   const transferItems = useTaskTransferMenuItem(task.identifier) as ContextMenuItem[] | null;
   const items = useMemo(() => {
     const base = buildItems(task);
